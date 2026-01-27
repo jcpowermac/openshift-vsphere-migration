@@ -1,0 +1,54 @@
+---
+# Target vCenter credentials secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vcenter-120-creds
+  namespace: openshift-config
+type: Opaque
+stringData:
+  vcenter-120.ci.ibmc.devcluster.openshift.com.username: "administrator@vsphere.local"
+  vcenter-120.ci.ibmc.devcluster.openshift.com.password: ""
+---
+apiVersion: migration.openshift.io/v1alpha1
+kind: VSphereMigration
+metadata:
+  name: vcenter-120-migration
+  namespace: openshift-config
+spec:
+  # Migration state - set to Running to start the migration
+  state: Pending
+
+  # Approval mode - use Automatic for unattended migration
+  approvalMode: Automatic
+
+  # Target vCenter credentials
+  # Source vCenter configuration is read from the existing Infrastructure CRD
+  targetVCenterCredentialsSecret:
+    name: vcenter-120-creds
+    namespace: openshift-config
+
+  # Failure domains for target vCenter
+  failureDomains:
+  - name: wldn-120-zone-a
+    region: wldn-120
+    zone: wldn-120-zone-a
+    server: vcenter-120.ci.ibmc.devcluster.openshift.com
+    topology:
+      datacenter: wldn-120-DC
+      computeCluster: /wldn-120-DC/host/wldn-120-cl01
+      datastore: /wldn-120-DC/datastore/wldn-120-cl01-vsan01
+      networks:
+      - ci-vlan-826
+
+  # Worker machine set configuration
+  machineSetConfig:
+    replicas: 3
+    failureDomain: wldn-120-zone-a
+
+  # Control plane machine set configuration
+  controlPlaneMachineSetConfig:
+    failureDomain: wldn-120-zone-a
+
+  # Automatically rollback on failure
+  rollbackOnFailure: true

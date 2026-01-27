@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vsphere-migration-controller
+  namespace: openshift-config
+  labels:
+    app: vsphere-migration-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vsphere-migration-controller
+  template:
+    metadata:
+      labels:
+        app: vsphere-migration-controller
+    spec:
+      serviceAccountName: vsphere-migration-controller
+      containers:
+      - name: controller
+        image: quay.io/openshift/vsphere-migration-controller:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - /usr/bin/vsphere-migration-controller
+        args:
+        - --v=2
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          requests:
+            cpu: 10m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      priorityClassName: system-cluster-critical

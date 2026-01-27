@@ -1,0 +1,54 @@
+apiVersion: migration.openshift.io/v1alpha1
+kind: VSphereMigration
+metadata:
+  name: vcenter-migration-example
+  namespace: openshift-config
+spec:
+  # Migration state - set to Running to start
+  state: Pending
+
+  # Approval mode - Automatic or Manual
+  approvalMode: Automatic
+
+  # Target vCenter credentials
+  # Source vCenter configuration is read from the existing Infrastructure CRD
+  targetVCenterCredentialsSecret:
+    name: vsphere-creds-new
+    namespace: openshift-config
+
+  # Failure domains for target vCenter
+  failureDomains:
+  - name: us-east-1a
+    region: us-east
+    zone: us-east-1a
+    server: vcenter-new.example.com
+    topology:
+      datacenter: DC2
+      computeCluster: /DC2/host/Cluster1
+      datastore: /DC2/datastore/datastore1
+      networks:
+      - VM Network
+
+  # Worker machine set configuration
+  machineSetConfig:
+    replicas: 3
+    failureDomain: us-east-1a
+
+  # Control plane machine set configuration
+  controlPlaneMachineSetConfig:
+    failureDomain: us-east-1a
+
+  # Automatically rollback on failure
+  rollbackOnFailure: true
+---
+# Target vCenter credentials secret
+# The secret keys must use the format: {vcenter-fqdn}.username and {vcenter-fqdn}.password
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vsphere-creds-new
+  namespace: openshift-config
+type: Opaque
+stringData:
+  vcenter-new.example.com.username: "administrator@vsphere.local"
+  vcenter-new.example.com.password: "newPassword456!"

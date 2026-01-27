@@ -1,0 +1,357 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: vspheremigrations.migration.openshift.io
+spec:
+  group: migration.openshift.io
+  names:
+    kind: VSphereMigration
+    listKind: VSphereMigrationList
+    plural: vspheremigrations
+    shortNames:
+    - vsm
+    singular: vspheremigration
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: VSphereMigration represents a migration from one vCenter to another
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: VSphereMigrationSpec defines the desired state of VSphereMigration
+            properties:
+              approvalMode:
+                default: Automatic
+                description: ApprovalMode controls whether phases require manual approval
+                enum:
+                - Automatic
+                - Manual
+                type: string
+              controlPlaneMachineSetConfig:
+                description: ControlPlaneMachineSetConfig defines configuration for
+                  control plane machines
+                properties:
+                  failureDomain:
+                    description: FailureDomain is the failure domain name to use
+                    type: string
+                required:
+                - failureDomain
+                type: object
+              failureDomains:
+                description: FailureDomains defines failure domains for the target
+                  vCenter
+                items:
+                  description: FailureDomain defines a failure domain for machine
+                    placement
+                  properties:
+                    name:
+                      description: Name is the unique identifier for this failure
+                        domain
+                      type: string
+                    region:
+                      description: Region is the region tag value
+                      type: string
+                    server:
+                      description: Server is the vCenter server for this failure domain
+                      type: string
+                    topology:
+                      description: Topology defines the vSphere topology
+                      properties:
+                        computeCluster:
+                          description: ComputeCluster is the compute cluster path
+                          type: string
+                        datacenter:
+                          description: Datacenter is the datacenter name
+                          type: string
+                        datastore:
+                          description: Datastore is the datastore path
+                          type: string
+                        networks:
+                          description: Networks is the list of network names
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - computeCluster
+                      - datacenter
+                      - datastore
+                      - networks
+                      type: object
+                    zone:
+                      description: Zone is the zone tag value
+                      type: string
+                  required:
+                  - name
+                  - region
+                  - server
+                  - topology
+                  - zone
+                  type: object
+                type: array
+              machineSetConfig:
+                description: MachineSetConfig defines configuration for new worker
+                  machines
+                properties:
+                  failureDomain:
+                    description: FailureDomain is the failure domain name to use
+                    type: string
+                  replicas:
+                    description: Replicas is the number of worker machines to create
+                    format: int32
+                    minimum: 1
+                    type: integer
+                required:
+                - failureDomain
+                - replicas
+                type: object
+              rollbackOnFailure:
+                default: true
+                description: RollbackOnFailure automatically triggers rollback on
+                  phase failure
+                type: boolean
+              state:
+                default: Pending
+                description: 'State controls the workflow: Pending, Running, Paused,
+                  Rollback'
+                enum:
+                - Pending
+                - Running
+                - Paused
+                - Rollback
+                type: string
+              targetVCenterCredentialsSecret:
+                description: |-
+                  TargetVCenterCredentialsSecret references the secret containing target vCenter credentials
+                  The secret should contain keys: {target-vcenter-fqdn}.username and {target-vcenter-fqdn}.password
+                  Source vCenter configuration is read from the Infrastructure CRD
+                properties:
+                  name:
+                    description: Name is the secret name
+                    type: string
+                  namespace:
+                    description: Namespace is the secret namespace
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - approvalMode
+            - controlPlaneMachineSetConfig
+            - failureDomains
+            - machineSetConfig
+            - rollbackOnFailure
+            - state
+            - targetVCenterCredentialsSecret
+            type: object
+          status:
+            description: VSphereMigrationStatus defines the observed state of VSphereMigration
+            properties:
+              backupManifests:
+                description: BackupManifests stores backups for rollback
+                items:
+                  description: BackupManifest stores a backup of a resource
+                  properties:
+                    backupData:
+                      description: BackupData is the base64-encoded YAML
+                      type: string
+                    backupTime:
+                      description: BackupTime is when the backup was created
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name is the resource name
+                      type: string
+                    namespace:
+                      description: Namespace is the resource namespace (if applicable)
+                      type: string
+                    resourceType:
+                      description: ResourceType is the type of resource
+                      type: string
+                  required:
+                  - backupData
+                  - backupTime
+                  - name
+                  - resourceType
+                  type: object
+                type: array
+              completionTime:
+                description: CompletionTime is when the migration completed
+                format: date-time
+                type: string
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the migration state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              currentPhaseState:
+                description: CurrentPhaseState tracks the current phase execution
+                properties:
+                  approved:
+                    description: Approved indicates if the phase has been approved
+                    type: boolean
+                  message:
+                    description: Message is a human-readable status message
+                    type: string
+                  name:
+                    description: Name is the phase name
+                    type: string
+                  progress:
+                    description: Progress is the completion percentage (0-100)
+                    format: int32
+                    type: integer
+                  requiresApproval:
+                    description: RequiresApproval indicates if manual approval is
+                      needed
+                    type: boolean
+                  status:
+                    description: Status is the current status
+                    type: string
+                required:
+                - name
+                - status
+                type: object
+              phase:
+                description: Phase is the current migration phase
+                type: string
+              phaseHistory:
+                description: PhaseHistory tracks completed phases with logs
+                items:
+                  description: PhaseHistoryEntry records the execution of a phase
+                  properties:
+                    completionTime:
+                      description: CompletionTime is when the phase completed
+                      format: date-time
+                      type: string
+                    logs:
+                      description: Logs contains structured log entries from the phase
+                      items:
+                        description: LogEntry represents a structured log entry
+                        properties:
+                          component:
+                            description: Component is the component that generated
+                              the log
+                            type: string
+                          fields:
+                            additionalProperties:
+                              type: string
+                            description: Fields contains additional structured data
+                            type: object
+                          level:
+                            description: Level is the log level
+                            type: string
+                          message:
+                            description: Message is the log message
+                            type: string
+                          timestamp:
+                            description: Timestamp is when the log was created
+                            format: date-time
+                            type: string
+                        required:
+                        - level
+                        - message
+                        - timestamp
+                        type: object
+                      type: array
+                    message:
+                      description: Message is a human-readable message about the phase
+                      type: string
+                    phase:
+                      description: Phase is the phase name
+                      type: string
+                    startTime:
+                      description: StartTime is when the phase started
+                      format: date-time
+                      type: string
+                    status:
+                      description: Status is the final status of the phase
+                      type: string
+                  required:
+                  - phase
+                  - startTime
+                  - status
+                  type: object
+                type: array
+              startTime:
+                description: StartTime is when the migration started
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
