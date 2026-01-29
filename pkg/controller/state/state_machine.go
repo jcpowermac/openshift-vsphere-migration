@@ -29,12 +29,13 @@ func NewStateMachine(executor *phases.PhaseExecutor) *StateMachine {
 			migrationv1alpha1.PhaseUpdateSecrets,
 			migrationv1alpha1.PhaseCreateTags,
 			migrationv1alpha1.PhaseCreateFolder,
+			migrationv1alpha1.PhaseDeleteCPMS, // DELETE CPMS BEFORE infrastructure update
 			migrationv1alpha1.PhaseUpdateInfrastructure,
 			migrationv1alpha1.PhaseUpdateConfig,
 			migrationv1alpha1.PhaseRestartPods,
 			migrationv1alpha1.PhaseMonitorHealth,
 			migrationv1alpha1.PhaseCreateWorkers,
-			migrationv1alpha1.PhaseRecreateCPMS,
+			migrationv1alpha1.PhaseRecreateCPMS, // RECREATE CPMS after infrastructure update
 			migrationv1alpha1.PhaseScaleOldMachines,
 			migrationv1alpha1.PhaseCleanup,
 			migrationv1alpha1.PhaseVerify,
@@ -178,6 +179,27 @@ func (s *StateMachine) InitiateRollback(ctx context.Context, migration *migratio
 		if err := phaseImpl.Rollback(ctx, migration); err != nil {
 			logger.Error(err, "Failed to rollback phase", "phase", historyEntry.Phase)
 			// Continue with other rollbacks
+		}
+	}
+
+	// Re-enable CVO as final step in rollback
+	logger.Info("Re-enabling CVO as final rollback step")
+	kubeClient := s.phaseExecutor.GetKubeClient()
+	deployment, err := kubeClient.AppsV1().
+		Deployments("openshift-cluster-version").
+		Get(ctx, "cluster-version-operator", metav1.GetOptions{})
+	if err != nil {
+		logger.Error(err, "Failed to get CVO deployment during rollback")
+	} else if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas == 0 {
+		replicas := int32(1)
+		deployment.Spec.Replicas = &replicas
+		_, err = kubeClient.AppsV1().
+			Deployments("openshift-cluster-version").
+			Update(ctx, deployment, metav1.UpdateOptions{})
+		if err != nil {
+			logger.Error(err, "Failed to re-enable CVO during rollback")
+		} else {
+			logger.Info("Successfully re-enabled CVO in rollback")
 		}
 	}
 

@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
@@ -133,12 +132,10 @@ func (c *MigrationController) syncMigration(ctx context.Context, migration *migr
 			migrationv1alpha1.ReasonReconcileSucceeded, fmt.Sprintf("Moved to phase %s", nextPhase))
 	}
 
-	// Check if should requeue
-	shouldRequeue, requeueAfter := c.stateMachine.ShouldRequeue(migration, result)
-	if shouldRequeue {
-		logger.V(2).Info("Requeuing migration", "after", requeueAfter)
-		time.Sleep(requeueAfter)
-	}
+	// Note: Requeue logic is handled by the controller-runtime framework
+	// The controller will automatically requeue based on the result from syncMigration
+	// Removing the blocking time.Sleep to allow proper workqueue-based requeuing
+	_, _ = c.stateMachine.ShouldRequeue(migration, result)
 
 	return nil
 }
@@ -159,6 +156,8 @@ func (c *MigrationController) getPhaseImplementation(phase migrationv1alpha1.Mig
 		return phases.NewCreateTagsPhase(c.phaseExecutor)
 	case migrationv1alpha1.PhaseCreateFolder:
 		return phases.NewCreateFolderPhase(c.phaseExecutor)
+	case migrationv1alpha1.PhaseDeleteCPMS:
+		return phases.NewDeleteCPMSPhase(c.phaseExecutor)
 	case migrationv1alpha1.PhaseUpdateInfrastructure:
 		return phases.NewUpdateInfrastructurePhase(c.phaseExecutor)
 	case migrationv1alpha1.PhaseUpdateConfig:
@@ -191,6 +190,7 @@ func (c *MigrationController) getAllPhases() []phases.Phase {
 		phases.NewUpdateSecretsPhase(c.phaseExecutor),
 		phases.NewCreateTagsPhase(c.phaseExecutor),
 		phases.NewCreateFolderPhase(c.phaseExecutor),
+		phases.NewDeleteCPMSPhase(c.phaseExecutor),
 		phases.NewUpdateInfrastructurePhase(c.phaseExecutor),
 		phases.NewUpdateConfigPhase(c.phaseExecutor),
 		phases.NewRestartPodsPhase(c.phaseExecutor),

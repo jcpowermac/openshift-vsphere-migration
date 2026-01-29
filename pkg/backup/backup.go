@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	configv1 "github.com/openshift/api/config/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -25,20 +28,53 @@ func NewBackupManager(scheme *runtime.Scheme) *BackupManager {
 	return &BackupManager{scheme: scheme}
 }
 
+// getGVKForObject determines the GVK for a given object
+func (m *BackupManager) getGVKForObject(obj client.Object) (schema.GroupVersionKind, error) {
+	// First try to get GVK from the object itself
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	if !gvk.Empty() {
+		return gvk, nil
+	}
+
+	// Try to infer from scheme
+	gvks, _, err := m.scheme.ObjectKinds(obj)
+	if err == nil && len(gvks) > 0 {
+		return gvks[0], nil
+	}
+
+	// Fall back to type assertions for well-known types
+	switch obj.(type) {
+	case *configv1.Infrastructure:
+		return schema.GroupVersionKind{
+			Group:   "config.openshift.io",
+			Version: "v1",
+			Kind:    "Infrastructure",
+		}, nil
+	case *corev1.Secret:
+		return schema.GroupVersionKind{
+			Group:   "",
+			Version: "v1",
+			Kind:    "Secret",
+		}, nil
+	case *corev1.ConfigMap:
+		return schema.GroupVersionKind{
+			Group:   "",
+			Version: "v1",
+			Kind:    "ConfigMap",
+		}, nil
+	default:
+		return schema.GroupVersionKind{}, fmt.Errorf("cannot determine GVK for object of type %T", obj)
+	}
+}
+
 // BackupResource backs up a Kubernetes resource
 func (m *BackupManager) BackupResource(ctx context.Context, obj client.Object, resourceType string) (*migrationv1alpha1.BackupManifest, error) {
 	logger := klog.FromContext(ctx)
 
 	// Get the GVK from the object
-	gvk := obj.GetObjectKind().GroupVersionKind()
-
-	// If GVK is not set, try to infer from scheme
-	if gvk.Empty() {
-		gvks, _, err := m.scheme.ObjectKinds(obj)
-		if err != nil || len(gvks) == 0 {
-			return nil, fmt.Errorf("cannot determine GVK for object: %w", err)
-		}
-		gvk = gvks[0]
+	gvk, err := m.getGVKForObject(obj)
+	if err != nil {
+		return nil, fmt.Errorf("cannot determine GVK for object: %w", err)
 	}
 
 	// Convert to unstructured to ensure TypeMeta is included

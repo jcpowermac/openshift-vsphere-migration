@@ -3,6 +3,7 @@ package phases
 import (
 	"context"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -81,7 +82,48 @@ func (p *BackupPhase) Execute(ctx context.Context, migration *migrationv1alpha1.
 
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Backed up vsphere-creds secret", string(p.Name()))
 
-	// TODO: Backup cloud-provider-config, machines, CPMS
+	// Backup cloud-provider-config ConfigMap
+	cm, err := p.executor.kubeClient.CoreV1().ConfigMaps("openshift-config").Get(ctx, "cloud-provider-config", metav1.GetOptions{})
+	if err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "Failed to get cloud-provider-config: " + err.Error(),
+			Logs:    logs,
+		}, err
+	}
+
+	cmBackup, err := p.executor.backupManager.BackupResource(ctx, client.Object(cm), "ConfigMap")
+	if err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "Failed to backup ConfigMap: " + err.Error(),
+			Logs:    logs,
+		}, err
+	}
+	p.executor.backupManager.AddBackupToMigration(migration, cmBackup)
+
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Backed up cloud-provider-config", string(p.Name()))
+
+	// Backup Control Plane Machine Set from openshift-machine-api
+	machineManager := p.executor.GetMachineManager()
+	cpms, err := machineManager.GetControlPlaneMachineSet(ctx)
+	if err != nil {
+		logger.Info("Failed to get CPMS (may not exist), skipping backup", "error", err)
+		logs = AddLog(logs, migrationv1alpha1.LogLevelWarning, "CPMS not found in openshift-machine-api, skipping backup", string(p.Name()))
+	} else if cpms != nil {
+		cpmsBackup, err := p.executor.backupManager.BackupResource(ctx, cpms, "ControlPlaneMachineSet")
+		if err != nil {
+			return &PhaseResult{
+				Status:  migrationv1alpha1.PhaseStatusFailed,
+				Message: "Failed to backup CPMS: " + err.Error(),
+				Logs:    logs,
+			}, err
+		}
+		p.executor.backupManager.AddBackupToMigration(migration, cpmsBackup)
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Backed up Control Plane Machine Set from openshift-machine-api", string(p.Name()))
+	}
+
+	// TODO: Backup machines
 
 	logger.Info("Successfully backed up all critical resources")
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Successfully backed up all critical resources", string(p.Name()))

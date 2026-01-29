@@ -93,20 +93,20 @@ func (m *ConfigMapManager) AddTargetVCenterToConfig(ctx context.Context, cm *cor
 	for server, datacenters := range vCenterMap {
 		// Create vcenter config
 		vcenterConfig := map[string]interface{}{
-			"server":              server,
-			"port":                443,
-			"insecureFlag":        true,
-			"datacenters":         datacenters,
-			"user":                "",
-			"password":            "",
-			"tenantref":           "",
-			"soapRoundtripCount":  0,
-			"caFile":              "",
-			"thumbprint":          "",
-			"secretref":           "",
-			"secretName":          "",
-			"secretNamespace":     "",
-			"ipFamily":            []string{},
+			"server":             server,
+			"port":               443,
+			"insecureFlag":       true,
+			"datacenters":        datacenters,
+			"user":               "",
+			"password":           "",
+			"tenantref":          "",
+			"soapRoundtripCount": 0,
+			"caFile":             "",
+			"thumbprint":         "",
+			"secretref":          "",
+			"secretName":         "",
+			"secretNamespace":    "",
+			"ipFamily":           []string{},
 		}
 
 		// Add to vcenter section

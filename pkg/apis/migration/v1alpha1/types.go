@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	configv1 "github.com/openshift/api/config/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -38,7 +39,9 @@ type VSphereMigrationSpec struct {
 	TargetVCenterCredentialsSecret SecretReference `json:"targetVCenterCredentialsSecret"`
 
 	// FailureDomains defines failure domains for the target vCenter
-	FailureDomains []FailureDomain `json:"failureDomains"`
+	// Use OpenShift's standard VSpherePlatformFailureDomainSpec which includes
+	// Name, Region, Zone, Server, and Topology with all necessary fields
+	FailureDomains []configv1.VSpherePlatformFailureDomainSpec `json:"failureDomains"`
 
 	// MachineSetConfig defines configuration for new worker machines
 	MachineSetConfig MachineSetConfig `json:"machineSetConfig"`
@@ -105,44 +108,9 @@ type SecretReference struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// FailureDomain defines a failure domain for machine placement
-// +k8s:deepcopy-gen=true
-type FailureDomain struct{
-	// Name is the unique identifier for this failure domain
-	Name string `json:"name"`
-
-	// Region is the region tag value
-	Region string `json:"region"`
-
-	// Zone is the zone tag value
-	Zone string `json:"zone"`
-
-	// Server is the vCenter server for this failure domain
-	Server string `json:"server"`
-
-	// Topology defines the vSphere topology
-	Topology FailureDomainTopology `json:"topology"`
-}
-
-// FailureDomainTopology defines vSphere infrastructure topology
-// +k8s:deepcopy-gen=true
-type FailureDomainTopology struct {
-	// Datacenter is the datacenter name
-	Datacenter string `json:"datacenter"`
-
-	// ComputeCluster is the compute cluster path
-	ComputeCluster string `json:"computeCluster"`
-
-	// Datastore is the datastore path
-	Datastore string `json:"datastore"`
-
-	// Networks is the list of network names
-	Networks []string `json:"networks"`
-}
-
 // MachineSetConfig defines worker machine configuration
 // +k8s:deepcopy-gen=true
-type MachineSetConfig struct{
+type MachineSetConfig struct {
 	// Replicas is the number of worker machines to create
 	// +kubebuilder:validation:Minimum=1
 	Replicas int32 `json:"replicas"`
@@ -153,14 +121,14 @@ type MachineSetConfig struct{
 
 // ControlPlaneMachineSetConfig defines control plane machine configuration
 // +k8s:deepcopy-gen=true
-type ControlPlaneMachineSetConfig struct{
+type ControlPlaneMachineSetConfig struct {
 	// FailureDomain is the failure domain name to use
 	FailureDomain string `json:"failureDomain"`
 }
 
 // VSphereMigrationStatus defines the observed state of VSphereMigration
 // +k8s:deepcopy-gen=true
-type VSphereMigrationStatus struct{
+type VSphereMigrationStatus struct {
 	// Phase is the current migration phase
 	Phase MigrationPhase `json:"phase,omitempty"`
 
@@ -187,31 +155,32 @@ type VSphereMigrationStatus struct{
 type MigrationPhase string
 
 const (
-	PhaseNone                   MigrationPhase = ""
-	PhasePreflight              MigrationPhase = "Preflight"
-	PhaseBackup                 MigrationPhase = "Backup"
-	PhaseDisableCVO             MigrationPhase = "DisableCVO"
-	PhaseUpdateSecrets          MigrationPhase = "UpdateSecrets"
-	PhaseCreateTags             MigrationPhase = "CreateTags"
-	PhaseCreateFolder           MigrationPhase = "CreateFolder"
-	PhaseUpdateInfrastructure   MigrationPhase = "UpdateInfrastructure"
-	PhaseUpdateConfig           MigrationPhase = "UpdateConfig"
-	PhaseRestartPods            MigrationPhase = "RestartPods"
-	PhaseMonitorHealth          MigrationPhase = "MonitorHealth"
-	PhaseCreateWorkers          MigrationPhase = "CreateWorkers"
-	PhaseRecreateCPMS           MigrationPhase = "RecreateCPMS"
-	PhaseScaleOldMachines       MigrationPhase = "ScaleOldMachines"
-	PhaseCleanup                MigrationPhase = "Cleanup"
-	PhaseVerify                 MigrationPhase = "Verify"
-	PhaseCompleted              MigrationPhase = "Completed"
-	PhaseFailed                 MigrationPhase = "Failed"
-	PhaseRollingBack            MigrationPhase = "RollingBack"
-	PhaseRollbackCompleted      MigrationPhase = "RollbackCompleted"
+	PhaseNone                 MigrationPhase = ""
+	PhasePreflight            MigrationPhase = "Preflight"
+	PhaseBackup               MigrationPhase = "Backup"
+	PhaseDisableCVO           MigrationPhase = "DisableCVO"
+	PhaseUpdateSecrets        MigrationPhase = "UpdateSecrets"
+	PhaseCreateTags           MigrationPhase = "CreateTags"
+	PhaseCreateFolder         MigrationPhase = "CreateFolder"
+	PhaseDeleteCPMS           MigrationPhase = "DeleteCPMS"
+	PhaseUpdateInfrastructure MigrationPhase = "UpdateInfrastructure"
+	PhaseUpdateConfig         MigrationPhase = "UpdateConfig"
+	PhaseRestartPods          MigrationPhase = "RestartPods"
+	PhaseMonitorHealth        MigrationPhase = "MonitorHealth"
+	PhaseCreateWorkers        MigrationPhase = "CreateWorkers"
+	PhaseRecreateCPMS         MigrationPhase = "RecreateCPMS"
+	PhaseScaleOldMachines     MigrationPhase = "ScaleOldMachines"
+	PhaseCleanup              MigrationPhase = "Cleanup"
+	PhaseVerify               MigrationPhase = "Verify"
+	PhaseCompleted            MigrationPhase = "Completed"
+	PhaseFailed               MigrationPhase = "Failed"
+	PhaseRollingBack          MigrationPhase = "RollingBack"
+	PhaseRollbackCompleted    MigrationPhase = "RollbackCompleted"
 )
 
 // PhaseHistoryEntry records the execution of a phase
 // +k8s:deepcopy-gen=true
-type PhaseHistoryEntry struct{
+type PhaseHistoryEntry struct {
 	// Phase is the phase name
 	Phase MigrationPhase `json:"phase"`
 
@@ -233,7 +202,7 @@ type PhaseHistoryEntry struct{
 
 // PhaseState tracks the current phase execution
 // +k8s:deepcopy-gen=true
-type PhaseState struct{
+type PhaseState struct {
 	// Name is the phase name
 	Name MigrationPhase `json:"name"`
 
@@ -266,7 +235,7 @@ const (
 
 // LogEntry represents a structured log entry
 // +k8s:deepcopy-gen=true
-type LogEntry struct{
+type LogEntry struct {
 	// Timestamp is when the log was created
 	Timestamp metav1.Time `json:"timestamp"`
 
@@ -295,7 +264,7 @@ const (
 
 // BackupManifest stores a backup of a resource
 // +k8s:deepcopy-gen=true
-type BackupManifest struct{
+type BackupManifest struct {
 	// ResourceType is the type of resource
 	ResourceType string `json:"resourceType"`
 

@@ -5,12 +5,15 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 
 	configv1 "github.com/openshift/api/config/v1"
 	configfake "github.com/openshift/client-go/config/clientset/versioned/fake"
+	machinefake "github.com/openshift/client-go/machine/clientset/versioned/fake"
 	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
 	"github.com/openshift/vsphere-migration-controller/pkg/backup"
 	"github.com/openshift/vsphere-migration-controller/pkg/controller/phases"
@@ -34,13 +37,13 @@ func TestPreflightPhase_Validate(t *testing.T) {
 						Name:      "target-vcenter-creds",
 						Namespace: "kube-system",
 					},
-					FailureDomains: []migrationv1alpha1.FailureDomain{
+					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 						{
 							Name:   "fd1",
 							Region: "us-east",
 							Zone:   "us-east-1a",
 							Server: "new-vcenter.example.com",
-							Topology: migrationv1alpha1.FailureDomainTopology{
+							Topology: configv1.VSpherePlatformTopology{
 								Datacenter:     "DC2",
 								ComputeCluster: "/DC2/host/cluster1",
 								Datastore:      "/DC2/datastore/ds1",
@@ -63,7 +66,7 @@ func TestPreflightPhase_Validate(t *testing.T) {
 					TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
 						Name: "",
 					},
-					FailureDomains: []migrationv1alpha1.FailureDomain{
+					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 						{
 							Name:   "fd1",
 							Server: "new-vcenter.example.com",
@@ -85,7 +88,7 @@ func TestPreflightPhase_Validate(t *testing.T) {
 						Name:      "target-vcenter-creds",
 						Namespace: "kube-system",
 					},
-					FailureDomains: []migrationv1alpha1.FailureDomain{},
+					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{},
 				},
 			},
 			expectError: true,
@@ -95,13 +98,16 @@ func TestPreflightPhase_Validate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create fake clients
-			kubeClient := fake.NewSimpleClientset()
+			kubeClient := kubefake.NewSimpleClientset()
 			configClient := configfake.NewSimpleClientset()
 			scheme := runtime.NewScheme()
 
 			// Create executor
 			backupMgr := backup.NewBackupManager(scheme)
-			executor := phases.NewPhaseExecutor(kubeClient, configClient, backupMgr, nil)
+			apiextensionsClient := apiextensionsfake.NewSimpleClientset()
+			machineClient := machinefake.NewSimpleClientset()
+			dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
+			executor := phases.NewPhaseExecutor(kubeClient, configClient, apiextensionsClient, machineClient, dynamicClient, backupMgr, nil)
 
 			// Create phase
 			phase := phases.NewPreflightPhase(executor)
@@ -120,12 +126,15 @@ func TestPreflightPhase_Validate(t *testing.T) {
 }
 
 func TestBackupPhase_Name(t *testing.T) {
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := kubefake.NewSimpleClientset()
 	configClient := configfake.NewSimpleClientset()
 	scheme := runtime.NewScheme()
 
 	backupMgr := backup.NewBackupManager(scheme)
-	executor := phases.NewPhaseExecutor(kubeClient, configClient, backupMgr, nil)
+	apiextensionsClient := apiextensionsfake.NewSimpleClientset()
+	machineClient := machinefake.NewSimpleClientset()
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
+	executor := phases.NewPhaseExecutor(kubeClient, configClient, apiextensionsClient, machineClient, dynamicClient, backupMgr, nil)
 
 	phase := phases.NewBackupPhase(executor)
 
@@ -147,12 +156,15 @@ func TestDisableCVOPhase_Execute(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewSimpleClientset(deployment)
+	kubeClient := kubefake.NewSimpleClientset(deployment)
 	configClient := configfake.NewSimpleClientset()
 	scheme := runtime.NewScheme()
 
 	backupMgr := backup.NewBackupManager(scheme)
-	executor := phases.NewPhaseExecutor(kubeClient, configClient, backupMgr, nil)
+	apiextensionsClient := apiextensionsfake.NewSimpleClientset()
+	machineClient := machinefake.NewSimpleClientset()
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
+	executor := phases.NewPhaseExecutor(kubeClient, configClient, apiextensionsClient, machineClient, dynamicClient, backupMgr, nil)
 
 	phase := phases.NewDisableCVOPhase(executor)
 
@@ -198,7 +210,7 @@ func TestUpdateSecretsPhase_Validate(t *testing.T) {
 						Name:      "target-vcenter-creds",
 						Namespace: "kube-system",
 					},
-					FailureDomains: []migrationv1alpha1.FailureDomain{
+					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 						{
 							Name:   "fd1",
 							Server: "new-vcenter.example.com",
@@ -215,7 +227,7 @@ func TestUpdateSecretsPhase_Validate(t *testing.T) {
 					TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
 						Name: "",
 					},
-					FailureDomains: []migrationv1alpha1.FailureDomain{
+					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 						{
 							Name:   "fd1",
 							Server: "new-vcenter.example.com",
@@ -229,12 +241,15 @@ func TestUpdateSecretsPhase_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			kubeClient := fake.NewSimpleClientset()
+			kubeClient := kubefake.NewSimpleClientset()
 			configClient := configfake.NewSimpleClientset()
 			scheme := runtime.NewScheme()
 
 			backupMgr := backup.NewBackupManager(scheme)
-			executor := phases.NewPhaseExecutor(kubeClient, configClient, backupMgr, nil)
+			apiextensionsClient := apiextensionsfake.NewSimpleClientset()
+			machineClient := machinefake.NewSimpleClientset()
+			dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
+			executor := phases.NewPhaseExecutor(kubeClient, configClient, apiextensionsClient, machineClient, dynamicClient, backupMgr, nil)
 
 			phase := phases.NewUpdateSecretsPhase(executor)
 
@@ -260,7 +275,7 @@ func TestCreateTagsPhase_Validate(t *testing.T) {
 			name: "valid migration with failure domains",
 			migration: &migrationv1alpha1.VSphereMigration{
 				Spec: migrationv1alpha1.VSphereMigrationSpec{
-					FailureDomains: []migrationv1alpha1.FailureDomain{
+					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 						{
 							Name:   "fd1",
 							Region: "us-east",
@@ -275,7 +290,7 @@ func TestCreateTagsPhase_Validate(t *testing.T) {
 			name: "missing failure domains",
 			migration: &migrationv1alpha1.VSphereMigration{
 				Spec: migrationv1alpha1.VSphereMigrationSpec{
-					FailureDomains: []migrationv1alpha1.FailureDomain{},
+					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{},
 				},
 			},
 			expectError: true,
@@ -284,12 +299,15 @@ func TestCreateTagsPhase_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			kubeClient := fake.NewSimpleClientset()
+			kubeClient := kubefake.NewSimpleClientset()
 			configClient := configfake.NewSimpleClientset()
 			scheme := runtime.NewScheme()
 
 			backupMgr := backup.NewBackupManager(scheme)
-			executor := phases.NewPhaseExecutor(kubeClient, configClient, backupMgr, nil)
+			apiextensionsClient := apiextensionsfake.NewSimpleClientset()
+			machineClient := machinefake.NewSimpleClientset()
+			dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
+			executor := phases.NewPhaseExecutor(kubeClient, configClient, apiextensionsClient, machineClient, dynamicClient, backupMgr, nil)
 
 			phase := phases.NewCreateTagsPhase(executor)
 
@@ -306,12 +324,15 @@ func TestCreateTagsPhase_Validate(t *testing.T) {
 }
 
 func TestAllPhases_HaveCorrectNames(t *testing.T) {
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := kubefake.NewSimpleClientset()
 	configClient := configfake.NewSimpleClientset()
 	scheme := runtime.NewScheme()
 
 	backupMgr := backup.NewBackupManager(scheme)
-	executor := phases.NewPhaseExecutor(kubeClient, configClient, backupMgr, nil)
+	apiextensionsClient := apiextensionsfake.NewSimpleClientset()
+	machineClient := machinefake.NewSimpleClientset()
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
+	executor := phases.NewPhaseExecutor(kubeClient, configClient, apiextensionsClient, machineClient, dynamicClient, backupMgr, nil)
 
 	tests := []struct {
 		phase        phases.Phase
@@ -323,6 +344,7 @@ func TestAllPhases_HaveCorrectNames(t *testing.T) {
 		{phases.NewUpdateSecretsPhase(executor), migrationv1alpha1.PhaseUpdateSecrets},
 		{phases.NewCreateTagsPhase(executor), migrationv1alpha1.PhaseCreateTags},
 		{phases.NewCreateFolderPhase(executor), migrationv1alpha1.PhaseCreateFolder},
+		{phases.NewDeleteCPMSPhase(executor), migrationv1alpha1.PhaseDeleteCPMS},
 		{phases.NewUpdateInfrastructurePhase(executor), migrationv1alpha1.PhaseUpdateInfrastructure},
 		{phases.NewUpdateConfigPhase(executor), migrationv1alpha1.PhaseUpdateConfig},
 		{phases.NewRestartPodsPhase(executor), migrationv1alpha1.PhaseRestartPods},
@@ -366,11 +388,14 @@ func TestUpdateInfrastructurePhase_Execute(t *testing.T) {
 	}
 
 	configClient := configfake.NewSimpleClientset(infra)
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := kubefake.NewSimpleClientset()
 	scheme := runtime.NewScheme()
 
 	backupMgr := backup.NewBackupManager(scheme)
-	executor := phases.NewPhaseExecutor(kubeClient, configClient, backupMgr, nil)
+	apiextensionsClient := apiextensionsfake.NewSimpleClientset()
+	machineClient := machinefake.NewSimpleClientset()
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
+	executor := phases.NewPhaseExecutor(kubeClient, configClient, apiextensionsClient, machineClient, dynamicClient, backupMgr, nil)
 
 	phase := phases.NewUpdateInfrastructurePhase(executor)
 
@@ -384,13 +409,13 @@ func TestUpdateInfrastructurePhase_Execute(t *testing.T) {
 				Name:      "target-vcenter-creds",
 				Namespace: "kube-system",
 			},
-			FailureDomains: []migrationv1alpha1.FailureDomain{
+			FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 				{
 					Name:   "fd1",
 					Region: "us-east",
 					Zone:   "us-east-1a",
 					Server: "new-vcenter.example.com",
-					Topology: migrationv1alpha1.FailureDomainTopology{
+					Topology: configv1.VSpherePlatformTopology{
 						Datacenter:     "DC2",
 						ComputeCluster: "/DC2/host/cluster1",
 						Datastore:      "/DC2/datastore/ds1",

@@ -57,13 +57,13 @@ func TestMigrationControllerSync(t *testing.T) {
 				Name:      "target-vcenter-creds",
 				Namespace: "kube-system",
 			},
-			FailureDomains: []migrationv1alpha1.FailureDomain{
+			FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 				{
 					Name:   "us-east-1a",
 					Region: "us-east",
 					Zone:   "us-east-1a",
 					Server: "new-vcenter.example.com",
-					Topology: migrationv1alpha1.FailureDomainTopology{
+					Topology: configv1.VSpherePlatformTopology{
 						Datacenter:     "DC2",
 						ComputeCluster: "/DC2/host/cluster1",
 						Datastore:      "/DC2/datastore/ds1",

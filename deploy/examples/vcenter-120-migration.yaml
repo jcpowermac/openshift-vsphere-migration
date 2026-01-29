@@ -29,6 +29,7 @@ spec:
     namespace: openshift-config
 
   # Failure domains for target vCenter
+  # Using OpenShift's VSpherePlatformFailureDomainSpec structure
   failureDomains:
   - name: wldn-120-zone-a
     region: wldn-120
@@ -40,6 +41,10 @@ spec:
       datastore: /wldn-120-DC/datastore/wldn-120-cl01-vsan01
       networks:
       - ci-vlan-826
+      # ResourcePool, Template, and Folder are now available from OpenShift API
+      resourcePool: /wldn-120-DC/host/wldn-120-cl01/Resources
+      template: "/wldn-120-DC/vm/rhcos-9.6.20251212-1-vmware"
+      folder: /wldn-120-DC/vm/jcallen2-h2v96
 
   # Worker machine set configuration
   machineSetConfig:

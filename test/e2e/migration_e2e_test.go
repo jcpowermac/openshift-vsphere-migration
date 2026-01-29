@@ -77,13 +77,13 @@ func TestFullMigration(t *testing.T) {
 				Name:      "target-vcenter-creds",
 				Namespace: "kube-system",
 			},
-			FailureDomains: []migrationv1alpha1.FailureDomain{
+			FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 				{
 					Name:   "e2e-fd",
 					Region: "e2e-region",
 					Zone:   "e2e-zone",
 					Server: targetServer.URL.Host,
-					Topology: migrationv1alpha1.FailureDomainTopology{
+					Topology: configv1.VSpherePlatformTopology{
 						Datacenter:     "DC0",
 						ComputeCluster: "/DC0/host/DC0_C0",
 						Datastore:      "/DC0/datastore/LocalDS_0",

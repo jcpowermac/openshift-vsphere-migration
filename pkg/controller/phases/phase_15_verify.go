@@ -16,7 +16,6 @@ import (
 type VerifyPhase struct {
 	executor        *PhaseExecutor
 	operatorManager *openshift.OperatorManager
-	machineManager  *openshift.MachineManager
 }
 
 // NewVerifyPhase creates a new verify phase
@@ -24,7 +23,6 @@ func NewVerifyPhase(executor *PhaseExecutor) *VerifyPhase {
 	return &VerifyPhase{
 		executor:        executor,
 		operatorManager: openshift.NewOperatorManager(executor.configClient),
-		machineManager:  openshift.NewMachineManager(executor.kubeClient),
 	}
 }
 
@@ -36,6 +34,47 @@ func (p *VerifyPhase) Name() migrationv1alpha1.MigrationPhase {
 // Validate checks if the phase can be executed
 func (p *VerifyPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
 	return nil
+}
+
+// waitForCVOReady waits for CVO deployment to be ready
+func (p *VerifyPhase) waitForCVOReady(ctx context.Context, timeout time.Duration) error {
+	logger := klog.FromContext(ctx)
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout waiting for CVO deployment to be ready")
+			}
+
+			deployment, err := p.executor.kubeClient.AppsV1().
+				Deployments("openshift-cluster-version").
+				Get(ctx, "cluster-version-operator", metav1.GetOptions{})
+			if err != nil {
+				logger.V(2).Info("Error getting CVO deployment", "error", err)
+				continue
+			}
+
+			// Check deployment is ready
+			if deployment.Status.ReadyReplicas == *deployment.Spec.Replicas &&
+				deployment.Status.Replicas == *deployment.Spec.Replicas &&
+				deployment.Status.UnavailableReplicas == 0 {
+				logger.Info("CVO deployment is ready",
+					"replicas", deployment.Status.ReadyReplicas)
+				return nil
+			}
+
+			logger.V(2).Info("Waiting for CVO deployment",
+				"ready", deployment.Status.ReadyReplicas,
+				"desired", *deployment.Spec.Replicas,
+				"unavailable", deployment.Status.UnavailableReplicas)
+		}
+	}
 }
 
 // Execute runs the phase
@@ -181,12 +220,22 @@ func (p *VerifyPhase) Execute(ctx context.Context, migration *migrationv1alpha1.
 		"Re-enabled cluster-version-operator",
 		string(p.Name()))
 
-	// Wait for CVO to be ready
-	logger.Info("Waiting for CVO to be ready")
-	time.Sleep(30 * time.Second) // Give it time to start
+	// Wait for CVO to become ready (not just scaled to 1)
+	logger.Info("Waiting for CVO deployment to become ready")
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+		"Waiting for CVO deployment readiness",
+		string(p.Name()))
+
+	if err := p.waitForCVOReady(ctx, 5*time.Minute); err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "CVO failed to become ready: " + err.Error(),
+			Logs:    logs,
+		}, err
+	}
 
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"CVO is ready",
+		"CVO is ready and running",
 		string(p.Name()))
 
 	logger.Info("Final verification completed successfully")

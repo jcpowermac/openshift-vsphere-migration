@@ -11,6 +11,13 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var (
+	// ExcludedOperators are operators that are allowed to be degraded during migration
+	ExcludedOperators = map[string]bool{
+		"machine-config": true, // Expected to be degraded when Infrastructure has multiple vcenters
+	}
+)
+
 // OperatorManager manages cluster operator operations
 type OperatorManager struct {
 	client configclient.Interface
@@ -46,6 +53,18 @@ func (m *OperatorManager) CheckAllOperatorsHealthy(ctx context.Context) (bool, [
 			case configv1.OperatorProgressing:
 				progressing = condition.Status == configv1.ConditionTrue
 			}
+		}
+
+		// Skip excluded operators
+		if ExcludedOperators[operator.Name] {
+			if !available || degraded {
+				logger.V(1).Info("Excluded operator is unhealthy (expected during migration)",
+					"operator", operator.Name,
+					"available", available,
+					"degraded", degraded,
+					"progressing", progressing)
+			}
+			continue
 		}
 
 		if !available || degraded {

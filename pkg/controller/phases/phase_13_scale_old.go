@@ -8,20 +8,17 @@ import (
 	"k8s.io/klog/v2"
 
 	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/openshift"
 )
 
 // ScaleOldMachinesPhase scales down old worker machines
 type ScaleOldMachinesPhase struct {
-	executor       *PhaseExecutor
-	machineManager *openshift.MachineManager
+	executor *PhaseExecutor
 }
 
 // NewScaleOldMachinesPhase creates a new scale old machines phase
 func NewScaleOldMachinesPhase(executor *PhaseExecutor) *ScaleOldMachinesPhase {
 	return &ScaleOldMachinesPhase{
-		executor:       executor,
-		machineManager: openshift.NewMachineManager(executor.kubeClient),
+		executor: executor,
 	}
 }
 
@@ -43,6 +40,9 @@ func (p *ScaleOldMachinesPhase) Execute(ctx context.Context, migration *migratio
 	logger.Info("Scaling down old worker machines")
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Scaling down old worker machines", string(p.Name()))
 
+	// Get MachineManager with all required clients
+	machineManager := p.executor.GetMachineManager()
+
 	// Get source vCenter from Infrastructure CRD
 	sourceVC, err := p.executor.infraManager.GetSourceVCenter(ctx)
 	if err != nil {
@@ -59,7 +59,7 @@ func (p *ScaleOldMachinesPhase) Execute(ctx context.Context, migration *migratio
 		fmt.Sprintf("Finding old MachineSets from source vCenter: %s", sourceVC.Server),
 		string(p.Name()))
 
-	oldMachineSets, err := p.machineManager.GetMachineSetsByVCenter(ctx, sourceVC.Server)
+	oldMachineSets, err := machineManager.GetMachineSetsByVCenter(ctx, sourceVC.Server)
 	if err != nil {
 		return &PhaseResult{
 			Status:  migrationv1alpha1.PhaseStatusFailed,
@@ -92,7 +92,7 @@ func (p *ScaleOldMachinesPhase) Execute(ctx context.Context, migration *migratio
 			fmt.Sprintf("Scaling down MachineSet %s to 0 replicas", ms.Name),
 			string(p.Name()))
 
-		if err := p.machineManager.ScaleMachineSet(ctx, ms.Name, 0); err != nil {
+		if err := machineManager.ScaleMachineSet(ctx, ms.Name, 0); err != nil {
 			return &PhaseResult{
 				Status:  migrationv1alpha1.PhaseStatusFailed,
 				Message: fmt.Sprintf("Failed to scale down MachineSet %s: %v", ms.Name, err),
@@ -135,6 +135,9 @@ func (p *ScaleOldMachinesPhase) Rollback(ctx context.Context, migration *migrati
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back ScaleOldMachines phase - restoring old MachineSets")
 
+	// Get MachineManager with all required clients
+	machineManager := p.executor.GetMachineManager()
+
 	// Get source vCenter from Infrastructure CRD
 	sourceVC, err := p.executor.infraManager.GetSourceVCenter(ctx)
 	if err != nil {
@@ -143,7 +146,7 @@ func (p *ScaleOldMachinesPhase) Rollback(ctx context.Context, migration *migrati
 	}
 
 	// Get old MachineSets
-	oldMachineSets, err := p.machineManager.GetMachineSetsByVCenter(ctx, sourceVC.Server)
+	oldMachineSets, err := machineManager.GetMachineSetsByVCenter(ctx, sourceVC.Server)
 	if err != nil {
 		logger.Error(err, "Failed to get old MachineSets")
 		return err
@@ -153,7 +156,7 @@ func (p *ScaleOldMachinesPhase) Rollback(ctx context.Context, migration *migrati
 	// TODO: Restore original replica count from backup
 	for _, ms := range oldMachineSets {
 		logger.Info("Restoring MachineSet", "name", ms.Name)
-		if err := p.machineManager.ScaleMachineSet(ctx, ms.Name, 3); err != nil {
+		if err := machineManager.ScaleMachineSet(ctx, ms.Name, 3); err != nil {
 			logger.Error(err, "Failed to restore MachineSet", "name", ms.Name)
 		}
 	}

@@ -3,7 +3,9 @@ package phases
 import (
 	"context"
 	"fmt"
+	"time"
 
+	configv1 "github.com/openshift/api/config/v1"
 	"k8s.io/klog/v2"
 
 	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
@@ -50,83 +52,167 @@ func (p *CreateWorkersPhase) Execute(ctx context.Context, migration *migrationv1
 			migration.Spec.MachineSetConfig.FailureDomain),
 		string(p.Name()))
 
-	// TODO: Implement MachineSet creation
-	// This would involve:
-	// 1. Get existing worker MachineSet as template
-	// 2. Create new MachineSet with:
-	//    - Updated name (e.g., add "-new" suffix)
-	//    - Target vCenter failure domain
-	//    - Desired replicas
-	// 3. Wait for machines to be provisioned
-	// 4. Wait for nodes to join cluster
-	// 5. Track progress
+	// Validate failure domain configuration early
+	targetFD := migration.Spec.MachineSetConfig.FailureDomain
+	var foundFD *configv1.VSpherePlatformFailureDomainSpec
+	for i := range migration.Spec.FailureDomains {
+		if migration.Spec.FailureDomains[i].Name == targetFD {
+			foundFD = &migration.Spec.FailureDomains[i]
+			break
+		}
+	}
 
-	// Placeholder implementation showing the flow
+	if foundFD == nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: fmt.Sprintf("failure domain %s not found in VSphereMigration CR", targetFD),
+			Logs:    logs,
+		}, fmt.Errorf("failure domain %s not found", targetFD)
+	}
+
+	if foundFD.Topology.Template == "" {
+		logger.Error(nil, "Template not configured",
+			"failureDomain", foundFD.Name,
+			"fullSpec", fmt.Sprintf("%+v", foundFD))
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: fmt.Sprintf("template not specified in failure domain %s topology", targetFD),
+			Logs:    logs,
+		}, fmt.Errorf("template required but not specified")
+	}
+
+	logger.Info("Validated failure domain configuration",
+		"name", foundFD.Name,
+		"template", foundFD.Topology.Template)
+
+	// Get MachineManager
+	machineManager := p.executor.GetMachineManager()
+
+	// Get infrastructure ID for naming
+	infraID, err := p.executor.infraManager.GetInfrastructureID(ctx)
+	if err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "Failed to get infrastructure ID: " + err.Error(),
+			Logs:    logs,
+		}, err
+	}
+
+	// Check if MachineSet already exists (idempotency)
+	newMachineSetName := fmt.Sprintf("%s-worker-%s", infraID, migration.Spec.MachineSetConfig.FailureDomain)
+	existingMS, err := machineManager.GetMachineSet(ctx, newMachineSetName)
+
+	if err == nil && existingMS != nil {
+		logger.Info("MachineSet already exists, verifying readiness",
+			"name", newMachineSetName)
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+			fmt.Sprintf("MachineSet %s already exists (idempotent)", newMachineSetName),
+			string(p.Name()))
+
+		// Wait for existing MachineSet to be ready
+		readyMachines, totalMachines, err := machineManager.WaitForMachinesReady(ctx, newMachineSetName, 30*time.Minute)
+		if err != nil {
+			return &PhaseResult{
+				Status:  migrationv1alpha1.PhaseStatusFailed,
+				Message: "Existing MachineSet not ready: " + err.Error(),
+				Logs:    logs,
+			}, err
+		}
+
+		// MachineSet already exists and is ready
+		return &PhaseResult{
+			Status:   migrationv1alpha1.PhaseStatusCompleted,
+			Message:  fmt.Sprintf("MachineSet already exists with %d/%d machines ready", readyMachines, totalMachines),
+			Progress: 100,
+			Logs:     logs,
+		}, nil
+	}
+
+	// Step 1: Get existing worker MachineSet as template
+	existingSets, err := machineManager.GetMachineSetsByVCenter(ctx, "")
+	if err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "Failed to get existing MachineSets: " + err.Error(),
+			Logs:    logs,
+		}, err
+	}
+
+	if len(existingSets) == 0 {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "No existing MachineSets to use as template",
+			Logs:    logs,
+		}, fmt.Errorf("no existing MachineSets found")
+	}
+
+	template := existingSets[0]
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Creating MachineSet for new workers",
+		fmt.Sprintf("Using MachineSet %s as template", template.Name),
 		string(p.Name()))
 
-	// Step 1: Create MachineSet
-	// machineSetName := fmt.Sprintf("worker-%s-new", migration.Spec.MachineSetConfig.FailureDomain)
-	// machineSet := createMachineSet(machineSetName, migration)
-	// err := machineClient.Create(ctx, machineSet)
-
+	// Step 2: Create new MachineSet
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"MachineSet created, waiting for machines to be provisioned",
+		fmt.Sprintf("Creating new MachineSet %s", newMachineSetName),
 		string(p.Name()))
 
-	// Step 2: Monitor machine provisioning
-	// This would be an async operation that checks periodically
-	// For now, return with requeue to check status later
-
-	// TODO: Check machine status
-	// readyMachines, totalMachines := getMachineStatus(ctx, machineSetName)
-	// progress = int32((readyMachines * 100) / totalMachines)
-
-	// If not all machines are ready, requeue
-	// if readyMachines < totalMachines {
-	// 	return &PhaseResult{
-	// 		Status:       migrationv1alpha1.PhaseStatusRunning,
-	// 		Message:      fmt.Sprintf("Waiting for machines to be ready (%d/%d)", readyMachines, totalMachines),
-	// 		Progress:     progress,
-	// 		Logs:         logs,
-	// 		RequeueAfter: 30 * time.Second,
-	// 	}, nil
-	// }
+	newMachineSet, err := machineManager.CreateWorkerMachineSet(ctx, newMachineSetName, migration, template, infraID)
+	if err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "Failed to create MachineSet: " + err.Error(),
+			Logs:    logs,
+		}, err
+	}
 
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Waiting for nodes to join cluster",
+		fmt.Sprintf("Created MachineSet %s with %d replicas", newMachineSet.Name, migration.Spec.MachineSetConfig.Replicas),
 		string(p.Name()))
 
-	// Step 3: Wait for nodes to join
-	// TODO: Check node status
-	// readyNodes, totalNodes := getNodeStatus(ctx, machineSetName)
-	// progress = 50 + int32((readyNodes * 50) / totalNodes)
-
-	// if readyNodes < totalNodes {
-	// 	return &PhaseResult{
-	// 		Status:       migrationv1alpha1.PhaseStatusRunning,
-	// 		Message:      fmt.Sprintf("Waiting for nodes to be ready (%d/%d)", readyNodes, totalNodes),
-	// 		Progress:     progress,
-	// 		Logs:         logs,
-	// 		RequeueAfter: 30 * time.Second,
-	// 	}, nil
-	// }
-
-	// Placeholder: Assume success for now
+	// Step 3: Wait for machines to be provisioned
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"All worker machines and nodes are ready",
+		"Waiting for machines to be provisioned",
+		string(p.Name()))
+
+	timeout := 30 * time.Minute
+	readyMachines, totalMachines, err := machineManager.WaitForMachinesReady(ctx, newMachineSet.Name, timeout)
+	if err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: fmt.Sprintf("Machines not ready: %v", err),
+			Logs:    logs,
+		}, err
+	}
+
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+		fmt.Sprintf("All %d machines are provisioned", readyMachines),
+		string(p.Name()))
+
+	// Step 4: Wait for nodes to join cluster
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+		"Waiting for nodes to join cluster and become Ready",
+		string(p.Name()))
+
+	readyNodes, totalNodes, err := machineManager.WaitForNodesReady(ctx, newMachineSet.Name, timeout)
+	if err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: fmt.Sprintf("Nodes not ready: %v", err),
+			Logs:    logs,
+		}, err
+	}
+
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+		fmt.Sprintf("All %d nodes are Ready (%d machines, %d nodes)", readyNodes, totalMachines, totalNodes),
 		string(p.Name()))
 
 	logger.Info("Successfully created all worker machines")
 
 	return &PhaseResult{
 		Status:   migrationv1alpha1.PhaseStatusCompleted,
-		Message:  "Successfully created all worker machines",
+		Message:  fmt.Sprintf("Successfully created MachineSet with %d ready nodes", readyNodes),
 		Progress: 100,
 		Logs:     logs,
-		// Remove RequeueAfter to proceed to next phase
-		RequeueAfter: 0,
 	}, nil
 }
 
@@ -135,38 +221,23 @@ func (p *CreateWorkersPhase) Rollback(ctx context.Context, migration *migrationv
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back CreateWorkers phase - deleting new worker MachineSet")
 
-	// TODO: Implement MachineSet deletion
-	// 1. Find MachineSet created by this phase
-	// 2. Delete MachineSet
-	// 3. Wait for machines and nodes to be removed
+	// Get infrastructure ID for naming
+	infraID, err := p.executor.infraManager.GetInfrastructureID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get infrastructure ID: %w", err)
+	}
 
-	// machineSetName := fmt.Sprintf("worker-%s-new", migration.Spec.MachineSetConfig.FailureDomain)
-	// err := machineClient.Delete(ctx, machineSetName)
-	// if err != nil {
-	// 	logger.Error(err, "Failed to delete new worker MachineSet")
-	// 	return err
-	// }
+	machineManager := p.executor.GetMachineManager()
+	machineSetName := fmt.Sprintf("%s-worker-%s", infraID, migration.Spec.MachineSetConfig.FailureDomain)
 
-	// Wait for deletion with timeout
-	// timeout := time.After(10 * time.Minute)
-	// ticker := time.NewTicker(10 * time.Second)
-	// defer ticker.Stop()
+	// Delete MachineSet
+	err = machineManager.DeleteMachineSet(ctx, machineSetName)
+	if err != nil {
+		logger.Error(err, "Failed to delete new worker MachineSet")
+		return err
+	}
 
-	// for {
-	// 	select {
-	// 	case <-timeout:
-	// 		return fmt.Errorf("timeout waiting for MachineSet deletion")
-	// 	case <-ticker.C:
-	// 		// Check if MachineSet still exists
-	// 		_, err := machineClient.Get(ctx, machineSetName)
-	// 		if errors.IsNotFound(err) {
-	// 			logger.Info("MachineSet successfully deleted")
-	// 			return nil
-	// 		}
-	// 	}
-	// }
-
-	logger.Info("Rollback for CreateWorkers phase completed (placeholder)")
+	logger.Info("Successfully deleted new worker MachineSet", "name", machineSetName)
 	return nil
 }
 

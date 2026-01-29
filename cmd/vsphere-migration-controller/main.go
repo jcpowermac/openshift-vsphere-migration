@@ -8,7 +8,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -17,23 +19,37 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	configv1 "github.com/openshift/api/config/v1"
+	machinev1beta1 "github.com/openshift/api/machine/v1beta1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
+	machineclient "github.com/openshift/client-go/machine/clientset/versioned"
 	"github.com/openshift/library-go/pkg/operator/events"
 	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
 	"github.com/openshift/vsphere-migration-controller/pkg/controller"
+	corev1 "k8s.io/api/core/v1"
+)
+
+const (
+	leaseLockName      = "vsphere-migration-controller"
+	leaseLockNamespace = "openshift-vsphere-migration"
 )
 
 var (
-	kubeconfig  string
-	masterURL   string
+	kubeconfig       string
+	masterURL        string
+	enableLeaderElect bool
 )
 
 func init() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file")
 	flag.StringVar(&masterURL, "master", "", "Kubernetes API server URL")
+	flag.BoolVar(&enableLeaderElect, "leader-elect", true, "Enable leader election for controller manager")
 }
 
 func main() {
@@ -97,6 +113,32 @@ func main() {
 		logger.Error(err, "Failed to add migration API to scheme")
 		os.Exit(1)
 	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		logger.Error(err, "Failed to add core API to scheme")
+		os.Exit(1)
+	}
+	if err := configv1.AddToScheme(scheme); err != nil {
+		logger.Error(err, "Failed to add config API to scheme")
+		os.Exit(1)
+	}
+	if err := machinev1beta1.AddToScheme(scheme); err != nil {
+		logger.Error(err, "Failed to add machine API to scheme")
+		os.Exit(1)
+	}
+
+	// Create machine client
+	machineClient, err := machineclient.NewForConfig(config)
+	if err != nil {
+		logger.Error(err, "Failed to create machine client")
+		os.Exit(1)
+	}
+
+	// Create controller-runtime client
+	runtimeClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		logger.Error(err, "Failed to create controller-runtime client")
+		os.Exit(1)
+	}
 
 	// Create event recorder
 	eventRecorder := events.NewLoggingEventRecorder("vsphere-migration-controller", clock.RealClock{})
@@ -105,8 +147,10 @@ func main() {
 	migrationController, factoryController := controller.NewMigrationController(
 		kubeClient,
 		configClient,
+		machineClient,
 		dynamicClient,
 		apiextensionsClient,
+		runtimeClient,
 		scheme,
 		eventRecorder,
 	)
@@ -137,24 +181,79 @@ func main() {
 		},
 	})
 
-	logger.Info("Starting informers")
-	informerFactory.Start(ctx.Done())
+	// Define the run function that starts the controller
+	run := func(ctx context.Context) {
+		logger.Info("Starting informers")
+		informerFactory.Start(ctx.Done())
 
-	// Wait for cache sync
-	logger.Info("Waiting for informer cache sync")
-	if !cache.WaitForCacheSync(ctx.Done(), migrationInformer.Informer().HasSynced) {
-		logger.Error(nil, "Failed to sync informer cache")
-		os.Exit(1)
+		// Wait for cache sync
+		logger.Info("Waiting for informer cache sync")
+		if !cache.WaitForCacheSync(ctx.Done(), migrationInformer.Informer().HasSynced) {
+			logger.Error(nil, "Failed to sync informer cache")
+			os.Exit(1)
+		}
+		logger.Info("Informer cache synced")
+
+		logger.Info("Starting controller")
+		go factoryController.Run(ctx, 1)
+
+		logger.Info("Controller started, waiting for shutdown signal")
+		<-ctx.Done()
+		logger.Info("Shutting down controller")
 	}
-	logger.Info("Informer cache synced")
 
-	logger.Info("Starting controller")
-	go factoryController.Run(ctx, 1)
+	// Run with or without leader election
+	if !enableLeaderElect {
+		logger.Info("Leader election disabled, running directly")
+		run(ctx)
+		return
+	}
 
-	logger.Info("Controller started, waiting for shutdown signal")
-	<-ctx.Done()
+	// Generate unique identity for this instance
+	id, err := os.Hostname()
+	if err != nil {
+		id = uuid.New().String()
+	}
+	id = id + "_" + uuid.New().String()
 
-	logger.Info("Shutting down controller")
+	logger.Info("Starting with leader election", "identity", id)
+
+	// Create resource lock for leader election
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      leaseLockName,
+			Namespace: leaseLockNamespace,
+		},
+		Client: kubeClient.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: id,
+		},
+	}
+
+	// Start leader election
+	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
+		Lock:            lock,
+		ReleaseOnCancel: true,
+		LeaseDuration:   15 * time.Second,
+		RenewDeadline:   10 * time.Second,
+		RetryPeriod:     2 * time.Second,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				logger.Info("Acquired leadership")
+				run(ctx)
+			},
+			OnStoppedLeading: func() {
+				logger.Info("Lost leadership, shutting down")
+				os.Exit(0)
+			},
+			OnNewLeader: func(identity string) {
+				if identity == id {
+					return
+				}
+				logger.Info("New leader elected", "leader", identity)
+			},
+		},
+	})
 }
 
 // buildConfig builds a Kubernetes config from flags

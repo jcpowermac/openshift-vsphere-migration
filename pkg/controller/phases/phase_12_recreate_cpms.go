@@ -7,20 +7,17 @@ import (
 	"k8s.io/klog/v2"
 
 	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/openshift"
 )
 
 // RecreateCPMSPhase recreates the Control Plane Machine Set
 type RecreateCPMSPhase struct {
-	executor       *PhaseExecutor
-	machineManager *openshift.MachineManager
+	executor *PhaseExecutor
 }
 
 // NewRecreateCPMSPhase creates a new recreate CPMS phase
 func NewRecreateCPMSPhase(executor *PhaseExecutor) *RecreateCPMSPhase {
 	return &RecreateCPMSPhase{
-		executor:       executor,
-		machineManager: openshift.NewMachineManager(executor.kubeClient),
+		executor: executor,
 	}
 }
 
@@ -39,53 +36,67 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
-	logger.Info("Recreating Control Plane Machine Set")
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Recreating Control Plane Machine Set", string(p.Name()))
+	logger.Info("Updating Control Plane Machine Set for new vCenter")
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Updating Control Plane Machine Set", string(p.Name()))
 
-	// Get current CPMS as template
-	logger.Info("Getting current Control Plane Machine Set")
+	machineManager := p.executor.GetMachineManager()
+
+	// Delete existing CPMS (triggers auto-recreation as Inactive)
+	logger.Info("Deleting Control Plane Machine Set to trigger recreation as Inactive")
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Getting current Control Plane Machine Set",
+		"Deleting CPMS to trigger recreation as Inactive",
 		string(p.Name()))
 
-	currentCPMS, err := p.machineManager.GetControlPlaneMachineSet(ctx)
-	if err != nil {
-		logger.Error(err, "Failed to get current CPMS (may not exist)")
-		// CPMS may not exist, continue
-	}
-
-	// Delete existing CPMS
-	logger.Info("Deleting existing Control Plane Machine Set")
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Deleting existing Control Plane Machine Set",
-		string(p.Name()))
-
-	if err := p.machineManager.DeleteControlPlaneMachineSet(ctx); err != nil {
+	if err := machineManager.DeleteControlPlaneMachineSet(ctx); err != nil {
 		logger.Error(err, "Failed to delete CPMS (may not exist)")
 		// Continue - CPMS may not have existed
 	}
 
+	// Wait for CPMS to become Inactive (auto-recreated)
+	logger.Info("Waiting for CPMS to become Inactive")
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Deleted existing CPMS",
+		"Waiting for CPMS to become Inactive",
 		string(p.Name()))
 
-	// Create new CPMS with target vCenter failure domain
-	logger.Info("Creating new Control Plane Machine Set",
-		"failureDomain", migration.Spec.ControlPlaneMachineSetConfig.FailureDomain)
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Creating new CPMS with target vCenter failure domain",
-		string(p.Name()))
-
-	if err := p.machineManager.CreateControlPlaneMachineSet(ctx, migration, currentCPMS); err != nil {
+	if err := machineManager.WaitForCPMSInactive(ctx, 5*time.Minute); err != nil {
 		return &PhaseResult{
 			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: "Failed to create new CPMS: " + err.Error(),
+			Message: "CPMS did not become Inactive: " + err.Error(),
 			Logs:    logs,
 		}, err
 	}
 
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Created new CPMS",
+		"CPMS is now Inactive",
+		string(p.Name()))
+
+	// Get infrastructure ID for folder path construction
+	infraID, err := p.executor.infraManager.GetInfrastructureID(ctx)
+	if err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "Failed to get infrastructure ID: " + err.Error(),
+			Logs:    logs,
+		}, err
+	}
+
+	// Update CPMS with new failure domain and set to Active
+	logger.Info("Updating CPMS with new failure domain",
+		"failureDomain", migration.Spec.ControlPlaneMachineSetConfig.FailureDomain)
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+		"Updating CPMS with target vCenter failure domain",
+		string(p.Name()))
+
+	if err := machineManager.UpdateCPMSFailureDomain(ctx, migration, infraID); err != nil {
+		return &PhaseResult{
+			Status:  migrationv1alpha1.PhaseStatusFailed,
+			Message: "Failed to update CPMS: " + err.Error(),
+			Logs:    logs,
+		}, err
+	}
+
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+		"Updated CPMS and set to Active",
 		string(p.Name()))
 
 	// Monitor rollout
@@ -94,7 +105,7 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 		"Monitoring control plane rollout",
 		string(p.Name()))
 
-	if err := p.machineManager.WaitForControlPlaneRollout(ctx, 60*time.Minute); err != nil {
+	if err := machineManager.WaitForControlPlaneRollout(ctx, 60*time.Minute); err != nil {
 		return &PhaseResult{
 			Status:  migrationv1alpha1.PhaseStatusFailed,
 			Message: "Control plane rollout failed: " + err.Error(),
@@ -106,11 +117,11 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 		"Control plane rollout completed successfully",
 		string(p.Name()))
 
-	logger.Info("Successfully recreated Control Plane Machine Set")
+	logger.Info("Successfully updated Control Plane Machine Set")
 
 	return &PhaseResult{
 		Status:   migrationv1alpha1.PhaseStatusCompleted,
-		Message:  "Successfully recreated CPMS and rolled out control plane",
+		Message:  "Successfully updated CPMS and rolled out control plane",
 		Progress: 100,
 		Logs:     logs,
 	}, nil
@@ -121,6 +132,9 @@ func (p *RecreateCPMSPhase) Rollback(ctx context.Context, migration *migrationv1
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back RecreateCPMS phase")
 
+	// Get MachineManager with all required clients
+	machineManager := p.executor.GetMachineManager()
+
 	// Get CPMS backup
 	backup, err := p.executor.backupManager.GetBackup(migration, "ControlPlaneMachineSet", "cluster", "openshift-machine-api")
 	if err != nil {
@@ -129,7 +143,7 @@ func (p *RecreateCPMSPhase) Rollback(ctx context.Context, migration *migrationv1
 	}
 
 	// Delete current CPMS
-	if err := p.machineManager.DeleteControlPlaneMachineSet(ctx); err != nil {
+	if err := machineManager.DeleteControlPlaneMachineSet(ctx); err != nil {
 		logger.Error(err, "Failed to delete CPMS during rollback")
 	}
 

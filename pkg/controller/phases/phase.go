@@ -6,9 +6,11 @@ import (
 
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
+	machineclient "github.com/openshift/client-go/machine/clientset/versioned"
 	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
 	"github.com/openshift/vsphere-migration-controller/pkg/backup"
 	"github.com/openshift/vsphere-migration-controller/pkg/openshift"
@@ -53,6 +55,8 @@ type PhaseExecutor struct {
 	kubeClient          kubernetes.Interface
 	configClient        configclient.Interface
 	apiextensionsClient apiextensionsclient.Interface
+	machineClient       machineclient.Interface
+	dynamicClient       dynamic.Interface
 	backupManager       *backup.BackupManager
 	restoreManager      *backup.RestoreManager
 	infraManager        *openshift.InfrastructureManager
@@ -66,6 +70,8 @@ func NewPhaseExecutor(
 	kubeClient kubernetes.Interface,
 	configClient configclient.Interface,
 	apiextensionsClient apiextensionsclient.Interface,
+	machineClient machineclient.Interface,
+	dynamicClient dynamic.Interface,
 	backupManager *backup.BackupManager,
 	restoreManager *backup.RestoreManager,
 ) *PhaseExecutor {
@@ -73,6 +79,8 @@ func NewPhaseExecutor(
 		kubeClient:          kubeClient,
 		configClient:        configClient,
 		apiextensionsClient: apiextensionsClient,
+		machineClient:       machineClient,
+		dynamicClient:       dynamicClient,
 		backupManager:       backupManager,
 		restoreManager:      restoreManager,
 		infraManager:        openshift.NewInfrastructureManagerWithClients(configClient, kubeClient, apiextensionsClient),
@@ -228,4 +236,14 @@ func (e *PhaseExecutor) GetVSphereClientFromMigration(ctx context.Context, migra
 	}
 
 	return client, nil
+}
+
+// GetMachineManager returns a machine manager for the executor
+func (e *PhaseExecutor) GetMachineManager() *openshift.MachineManager {
+	return openshift.NewMachineManagerWithClients(e.kubeClient, e.machineClient, e.dynamicClient)
+}
+
+// GetKubeClient returns the Kubernetes client
+func (e *PhaseExecutor) GetKubeClient() kubernetes.Interface {
+	return e.kubeClient
 }

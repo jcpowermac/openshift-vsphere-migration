@@ -138,7 +138,7 @@ func (m *PodManager) RestartVSpherePods(ctx context.Context) error {
 
 	// Delete cloud controller manager pods
 	_, err := m.DeletePodsByLabel(ctx, "openshift-cloud-controller-manager", map[string]string{
-		"app": "vsphere-cloud-controller-manager",
+		"k8s-app": "vsphere-cloud-controller-manager",
 	})
 	if err != nil {
 		logger.Error(err, "Failed to delete cloud controller manager pods")
@@ -153,12 +153,20 @@ func (m *PodManager) RestartVSpherePods(ctx context.Context) error {
 		logger.Error(err, "Failed to delete machine API controller pods")
 	}
 
-	// Delete CSI driver pods
+	// Delete CSI driver controller pods
 	_, err = m.DeletePodsByLabel(ctx, "openshift-cluster-csi-drivers", map[string]string{
-		"app": "vmware-vsphere-csi-driver",
+		"app": "vmware-vsphere-csi-driver-controller",
 	})
 	if err != nil {
-		logger.Error(err, "Failed to delete CSI driver pods")
+		logger.Error(err, "Failed to delete CSI driver controller pods")
+	}
+
+	// Delete CSI driver node pods
+	_, err = m.DeletePodsByLabel(ctx, "openshift-cluster-csi-drivers", map[string]string{
+		"app": "vmware-vsphere-csi-driver-node",
+	})
+	if err != nil {
+		logger.Error(err, "Failed to delete CSI driver node pods")
 	}
 
 	logger.Info("Successfully triggered restart of vSphere pods")
@@ -172,7 +180,7 @@ func (m *PodManager) WaitForVSpherePodsReady(ctx context.Context, timeout time.D
 
 	// Wait for cloud controller manager
 	if err := m.WaitForPodsReady(ctx, "openshift-cloud-controller-manager", map[string]string{
-		"app": "vsphere-cloud-controller-manager",
+		"k8s-app": "vsphere-cloud-controller-manager",
 	}, timeout); err != nil {
 		return fmt.Errorf("cloud controller manager pods not ready: %w", err)
 	}
@@ -184,11 +192,18 @@ func (m *PodManager) WaitForVSpherePodsReady(ctx context.Context, timeout time.D
 		return fmt.Errorf("machine API controller pods not ready: %w", err)
 	}
 
-	// Wait for CSI driver
+	// Wait for CSI driver controller pods
 	if err := m.WaitForPodsReady(ctx, "openshift-cluster-csi-drivers", map[string]string{
-		"app": "vmware-vsphere-csi-driver",
+		"app": "vmware-vsphere-csi-driver-controller",
 	}, timeout); err != nil {
-		return fmt.Errorf("CSI driver pods not ready: %w", err)
+		return fmt.Errorf("CSI driver controller pods not ready: %w", err)
+	}
+
+	// Wait for CSI driver node pods
+	if err := m.WaitForPodsReady(ctx, "openshift-cluster-csi-drivers", map[string]string{
+		"app": "vmware-vsphere-csi-driver-node",
+	}, timeout); err != nil {
+		return fmt.Errorf("CSI driver node pods not ready: %w", err)
 	}
 
 	logger.Info("All vSphere pods are ready")

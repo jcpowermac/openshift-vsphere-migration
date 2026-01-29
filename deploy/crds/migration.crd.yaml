@@ -76,22 +76,58 @@ spec:
                       description: Server is the vCenter server for this failure domain
                       type: string
                     topology:
-                      description: Topology defines the vSphere topology
+                      description: topology describes a given failure domain using vSphere constructs
                       properties:
                         computeCluster:
-                          description: ComputeCluster is the compute cluster path
+                          description: |-
+                            computeCluster the absolute path of the vCenter cluster
+                            in which virtual machine will be located.
+                            The absolute path is of the form /<datacenter>/host/<cluster>.
+                          maxLength: 2048
+                          pattern: ^/.*?/host/.*?
                           type: string
                         datacenter:
-                          description: Datacenter is the datacenter name
+                          description: |-
+                            datacenter is the name of vCenter datacenter in which virtual machines will be located.
+                          maxLength: 80
                           type: string
                         datastore:
-                          description: Datastore is the datastore path
+                          description: |-
+                            datastore is the absolute path of the datastore in which the
+                            virtual machine is located.
+                            The absolute path is of the form /<datacenter>/datastore/<datastore>
+                          maxLength: 2048
+                          pattern: ^/.*?/datastore/.*?
+                          type: string
+                        folder:
+                          description: |-
+                            folder is the absolute path of the folder where
+                            virtual machines are located. The absolute path
+                            is of the form /<datacenter>/vm/<folder>.
+                          maxLength: 2048
+                          pattern: ^/.*?/vm/.*?
                           type: string
                         networks:
-                          description: Networks is the list of network names
+                          description: networks is the list of port group network names within this failure domain.
                           items:
                             type: string
+                          minItems: 1
                           type: array
+                        resourcePool:
+                          description: |-
+                            resourcePool is the absolute path of the resource pool where virtual machines will be
+                            created. The absolute path is of the form /<datacenter>/host/<cluster>/Resources/<resourcepool>.
+                          maxLength: 2048
+                          pattern: ^/.*?/host/.*?/Resources.*
+                          type: string
+                        template:
+                          description: |-
+                            template is the full inventory path of the virtual machine or template
+                            that will be cloned when creating new machines in this failure domain.
+                          maxLength: 2048
+                          minLength: 1
+                          pattern: ^/.*?/vm/.*?
+                          type: string
                       required:
                       - computeCluster
                       - datacenter

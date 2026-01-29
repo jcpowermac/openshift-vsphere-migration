@@ -15,8 +15,10 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
+	machineclient "github.com/openshift/client-go/machine/clientset/versioned"
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
 	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
@@ -43,8 +45,10 @@ type MigrationController struct {
 func NewMigrationController(
 	kubeClient kubernetes.Interface,
 	configClient configclient.Interface,
+	machineClient machineclient.Interface,
 	dynamicClient dynamic.Interface,
 	apiextensionsClient apiextensionsclient.Interface,
+	runtimeClient client.Client,
 	scheme *runtime.Scheme,
 	recorder events.Recorder,
 ) (*MigrationController, factory.Controller) {
@@ -64,14 +68,15 @@ func NewMigrationController(
 
 	// Initialize managers
 	c.backupManager = backup.NewBackupManager(scheme)
-	// Note: restoreManager needs a controller-runtime client, simplified here
-	// c.restoreManager = backup.NewRestoreManager(runtimeClient, scheme)
+	c.restoreManager = backup.NewRestoreManager(runtimeClient, scheme)
 
 	// Initialize phase executor
 	c.phaseExecutor = phases.NewPhaseExecutor(
 		kubeClient,
 		configClient,
 		apiextensionsClient,
+		machineClient,
+		dynamicClient,
 		c.backupManager,
 		c.restoreManager,
 	)
@@ -82,7 +87,7 @@ func NewMigrationController(
 	// Create factory controller
 	factoryController := factory.New().
 		WithSync(c.sync).
-		ResyncEvery(1 * time.Minute).
+		ResyncEvery(1*time.Minute).
 		ToController("vsphere-migration-controller", recorder)
 
 	return c, factoryController

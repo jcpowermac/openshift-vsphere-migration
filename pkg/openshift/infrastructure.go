@@ -22,8 +22,8 @@ const (
 
 // InfrastructureManager manages Infrastructure CRD operations
 type InfrastructureManager struct {
-	client            configclient.Interface
-	kubeClient        kubernetes.Interface
+	client              configclient.Interface
+	kubeClient          kubernetes.Interface
 	apiextensionsClient apiextensionsclient.Interface
 }
 
@@ -127,6 +127,9 @@ func (m *InfrastructureManager) AddTargetVCenter(ctx context.Context, infra *con
 				ComputeCluster: fd.Topology.ComputeCluster,
 				Datastore:      fd.Topology.Datastore,
 				Networks:       fd.Topology.Networks,
+				ResourcePool:   fd.Topology.ResourcePool,
+				Template:       fd.Topology.Template,
+				Folder:         fd.Topology.Folder,
 			},
 		}
 		infra.Spec.PlatformSpec.VSphere.FailureDomains = append(infra.Spec.PlatformSpec.VSphere.FailureDomains, failureDomain)
