@@ -6,7 +6,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // PreflightPhase validates prerequisites for migration
@@ -25,7 +25,7 @@ func (p *PreflightPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *PreflightPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *PreflightPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	// Basic validation
 	if len(migration.Spec.FailureDomains) == 0 {
 		return fmt.Errorf("no failure domains specified")
@@ -37,7 +37,7 @@ func (p *PreflightPhase) Validate(ctx context.Context, migration *migrationv1alp
 }
 
 // Execute runs the phase
-func (p *PreflightPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *PreflightPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -126,10 +126,11 @@ func (p *PreflightPhase) Execute(ctx context.Context, migration *migrationv1alph
 			fmt.Sprintf("Successfully connected to target vCenter: %s", targetServer),
 			string(p.Name()))
 
-		// Validate target vCenter datacenters from failure domains
+		// Validate target vCenter topology from failure domains
 		for _, fd := range migration.Spec.FailureDomains {
 			if fd.Server == targetServer {
-				_, err = targetClient.GetDatacenter(ctx, fd.Topology.Datacenter)
+				// Set datacenter context for finder
+				dc, err := targetClient.GetDatacenter(ctx, fd.Topology.Datacenter)
 				if err != nil {
 					return &PhaseResult{
 						Status:  migrationv1alpha1.PhaseStatusFailed,
@@ -137,10 +138,101 @@ func (p *PreflightPhase) Execute(ctx context.Context, migration *migrationv1alph
 						Logs:    logs,
 					}, err
 				}
+				targetClient.Finder().SetDatacenter(dc)
 
 				logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
 					fmt.Sprintf("Validated target datacenter: %s", fd.Topology.Datacenter),
 					string(p.Name()))
+
+				// Validate ComputeCluster
+				if fd.Topology.ComputeCluster != "" {
+					_, err = targetClient.GetCluster(ctx, fd.Topology.ComputeCluster)
+					if err != nil {
+						return &PhaseResult{
+							Status:  migrationv1alpha1.PhaseStatusFailed,
+							Message: fmt.Sprintf("Failed to find compute cluster %s in failure domain %s: %v", fd.Topology.ComputeCluster, fd.Name, err),
+							Logs:    logs,
+						}, err
+					}
+					logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+						fmt.Sprintf("Validated compute cluster: %s", fd.Topology.ComputeCluster),
+						string(p.Name()))
+				}
+
+				// Validate Datastore
+				if fd.Topology.Datastore != "" {
+					_, err = targetClient.GetDatastore(ctx, fd.Topology.Datastore)
+					if err != nil {
+						return &PhaseResult{
+							Status:  migrationv1alpha1.PhaseStatusFailed,
+							Message: fmt.Sprintf("Failed to find datastore %s in failure domain %s: %v", fd.Topology.Datastore, fd.Name, err),
+							Logs:    logs,
+						}, err
+					}
+					logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+						fmt.Sprintf("Validated datastore: %s", fd.Topology.Datastore),
+						string(p.Name()))
+				}
+
+				// Validate Networks
+				for _, network := range fd.Topology.Networks {
+					_, err = targetClient.GetNetwork(ctx, network)
+					if err != nil {
+						return &PhaseResult{
+							Status:  migrationv1alpha1.PhaseStatusFailed,
+							Message: fmt.Sprintf("Failed to find network %s in failure domain %s: %v", network, fd.Name, err),
+							Logs:    logs,
+						}, err
+					}
+					logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+						fmt.Sprintf("Validated network: %s", network),
+						string(p.Name()))
+				}
+
+				// Validate ResourcePool (if specified)
+				if fd.Topology.ResourcePool != "" {
+					_, err = targetClient.GetResourcePool(ctx, fd.Topology.ResourcePool)
+					if err != nil {
+						return &PhaseResult{
+							Status:  migrationv1alpha1.PhaseStatusFailed,
+							Message: fmt.Sprintf("Failed to find resource pool %s in failure domain %s: %v", fd.Topology.ResourcePool, fd.Name, err),
+							Logs:    logs,
+						}, err
+					}
+					logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+						fmt.Sprintf("Validated resource pool: %s", fd.Topology.ResourcePool),
+						string(p.Name()))
+				}
+
+				// Validate Template (if specified)
+				if fd.Topology.Template != "" {
+					_, err = targetClient.GetVirtualMachine(ctx, fd.Topology.Template)
+					if err != nil {
+						return &PhaseResult{
+							Status:  migrationv1alpha1.PhaseStatusFailed,
+							Message: fmt.Sprintf("Failed to find template %s in failure domain %s: %v", fd.Topology.Template, fd.Name, err),
+							Logs:    logs,
+						}, err
+					}
+					logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+						fmt.Sprintf("Validated template: %s", fd.Topology.Template),
+						string(p.Name()))
+				}
+
+				// Check Folder (warning if missing - will be created by CreateFolder phase)
+				if fd.Topology.Folder != "" {
+					_, err = targetClient.GetFolder(ctx, fd.Topology.Folder)
+					if err != nil {
+						logger.Info("Folder not found (will be created)", "folder", fd.Topology.Folder, "failureDomain", fd.Name)
+						logs = AddLog(logs, migrationv1alpha1.LogLevelWarning,
+							fmt.Sprintf("Folder %s not found in failure domain %s - will be created", fd.Topology.Folder, fd.Name),
+							string(p.Name()))
+					} else {
+						logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+							fmt.Sprintf("Validated folder: %s", fd.Topology.Folder),
+							string(p.Name()))
+					}
+				}
 			}
 		}
 	}
@@ -162,7 +254,7 @@ func (p *PreflightPhase) Execute(ctx context.Context, migration *migrationv1alph
 }
 
 // Rollback reverts the phase changes
-func (p *PreflightPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *PreflightPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	// Preflight has no state to rollback
 	return nil
 }

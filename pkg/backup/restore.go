@@ -14,7 +14,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // RestoreManager manages resource restoration
@@ -123,7 +123,7 @@ func (m *RestoreManager) RestoreResourceWithRetry(ctx context.Context, backup *m
 }
 
 // RestoreAllBackups restores all backups from a migration
-func (m *RestoreManager) RestoreAllBackups(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (m *RestoreManager) RestoreAllBackups(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Restoring all backups", "count", len(migration.Status.BackupManifests))
 

@@ -14,25 +14,25 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	configfake "github.com/openshift/client-go/config/clientset/versioned/fake"
 	machinefake "github.com/openshift/client-go/machine/clientset/versioned/fake"
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/backup"
-	"github.com/openshift/vsphere-migration-controller/pkg/controller/phases"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/backup"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/controller/phases"
 )
 
 func TestPreflightPhase_Validate(t *testing.T) {
 	tests := []struct {
 		name        string
-		migration   *migrationv1alpha1.VSphereMigration
+		migration   *migrationv1alpha1.VmwareCloudFoundationMigration
 		expectError bool
 	}{
 		{
 			name: "valid migration",
-			migration: &migrationv1alpha1.VSphereMigration{
+			migration: &migrationv1alpha1.VmwareCloudFoundationMigration{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-migration",
-					Namespace: "openshift-config",
+					Namespace: "vmware-cloud-foundation-migration",
 				},
-				Spec: migrationv1alpha1.VSphereMigrationSpec{
+				Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 					TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
 						Name:      "target-vcenter-creds",
 						Namespace: "kube-system",
@@ -57,12 +57,12 @@ func TestPreflightPhase_Validate(t *testing.T) {
 		},
 		{
 			name: "missing target credentials secret",
-			migration: &migrationv1alpha1.VSphereMigration{
+			migration: &migrationv1alpha1.VmwareCloudFoundationMigration{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-migration",
-					Namespace: "openshift-config",
+					Namespace: "vmware-cloud-foundation-migration",
 				},
-				Spec: migrationv1alpha1.VSphereMigrationSpec{
+				Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 					TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
 						Name: "",
 					},
@@ -78,12 +78,12 @@ func TestPreflightPhase_Validate(t *testing.T) {
 		},
 		{
 			name: "missing failure domains",
-			migration: &migrationv1alpha1.VSphereMigration{
+			migration: &migrationv1alpha1.VmwareCloudFoundationMigration{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-migration",
-					Namespace: "openshift-config",
+					Namespace: "vmware-cloud-foundation-migration",
 				},
-				Spec: migrationv1alpha1.VSphereMigrationSpec{
+				Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 					TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
 						Name:      "target-vcenter-creds",
 						Namespace: "kube-system",
@@ -168,10 +168,10 @@ func TestDisableCVOPhase_Execute(t *testing.T) {
 
 	phase := phases.NewDisableCVOPhase(executor)
 
-	migration := &migrationv1alpha1.VSphereMigration{
+	migration := &migrationv1alpha1.VmwareCloudFoundationMigration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-migration",
-			Namespace: "openshift-config",
+			Namespace: "vmware-cloud-foundation-migration",
 		},
 	}
 
@@ -199,13 +199,13 @@ func TestDisableCVOPhase_Execute(t *testing.T) {
 func TestUpdateSecretsPhase_Validate(t *testing.T) {
 	tests := []struct {
 		name        string
-		migration   *migrationv1alpha1.VSphereMigration
+		migration   *migrationv1alpha1.VmwareCloudFoundationMigration
 		expectError bool
 	}{
 		{
 			name: "valid migration",
-			migration: &migrationv1alpha1.VSphereMigration{
-				Spec: migrationv1alpha1.VSphereMigrationSpec{
+			migration: &migrationv1alpha1.VmwareCloudFoundationMigration{
+				Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 					TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
 						Name:      "target-vcenter-creds",
 						Namespace: "kube-system",
@@ -222,8 +222,8 @@ func TestUpdateSecretsPhase_Validate(t *testing.T) {
 		},
 		{
 			name: "missing credentials secret",
-			migration: &migrationv1alpha1.VSphereMigration{
-				Spec: migrationv1alpha1.VSphereMigrationSpec{
+			migration: &migrationv1alpha1.VmwareCloudFoundationMigration{
+				Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 					TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
 						Name: "",
 					},
@@ -268,13 +268,13 @@ func TestUpdateSecretsPhase_Validate(t *testing.T) {
 func TestCreateTagsPhase_Validate(t *testing.T) {
 	tests := []struct {
 		name        string
-		migration   *migrationv1alpha1.VSphereMigration
+		migration   *migrationv1alpha1.VmwareCloudFoundationMigration
 		expectError bool
 	}{
 		{
 			name: "valid migration with failure domains",
-			migration: &migrationv1alpha1.VSphereMigration{
-				Spec: migrationv1alpha1.VSphereMigrationSpec{
+			migration: &migrationv1alpha1.VmwareCloudFoundationMigration{
+				Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{
 						{
 							Name:   "fd1",
@@ -288,8 +288,8 @@ func TestCreateTagsPhase_Validate(t *testing.T) {
 		},
 		{
 			name: "missing failure domains",
-			migration: &migrationv1alpha1.VSphereMigration{
-				Spec: migrationv1alpha1.VSphereMigrationSpec{
+			migration: &migrationv1alpha1.VmwareCloudFoundationMigration{
+				Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 					FailureDomains: []configv1.VSpherePlatformFailureDomainSpec{},
 				},
 			},
@@ -351,6 +351,7 @@ func TestAllPhases_HaveCorrectNames(t *testing.T) {
 		{phases.NewMonitorHealthPhase(executor), migrationv1alpha1.PhaseMonitorHealth},
 		{phases.NewCreateWorkersPhase(executor), migrationv1alpha1.PhaseCreateWorkers},
 		{phases.NewRecreateCPMSPhase(executor), migrationv1alpha1.PhaseRecreateCPMS},
+		{phases.NewMigrateCSIVolumesPhase(executor), migrationv1alpha1.PhaseMigrateCSIVolumes},
 		{phases.NewScaleOldMachinesPhase(executor), migrationv1alpha1.PhaseScaleOldMachines},
 		{phases.NewCleanupPhase(executor), migrationv1alpha1.PhaseCleanup},
 		{phases.NewVerifyPhase(executor), migrationv1alpha1.PhaseVerify},
@@ -399,12 +400,12 @@ func TestUpdateInfrastructurePhase_Execute(t *testing.T) {
 
 	phase := phases.NewUpdateInfrastructurePhase(executor)
 
-	migration := &migrationv1alpha1.VSphereMigration{
+	migration := &migrationv1alpha1.VmwareCloudFoundationMigration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-migration",
-			Namespace: "openshift-config",
+			Namespace: "vmware-cloud-foundation-migration",
 		},
-		Spec: migrationv1alpha1.VSphereMigrationSpec{
+		Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 			TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
 				Name:      "target-vcenter-creds",
 				Namespace: "kube-system",

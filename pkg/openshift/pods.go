@@ -173,6 +173,94 @@ func (m *PodManager) RestartVSpherePods(ctx context.Context) error {
 	return nil
 }
 
+// VSpherePodsStatus contains the status of vSphere pods
+type VSpherePodsStatus struct {
+	AllReady                  bool
+	CloudControllerReady      int
+	CloudControllerTotal      int
+	MachineAPIReady           int
+	MachineAPITotal           int
+	CSIControllerReady        int
+	CSIControllerTotal        int
+	CSINodeReady              int
+	CSINodeTotal              int
+	NotReadyReason            string
+}
+
+// CheckVSpherePodsReady checks if all vSphere pods are ready without blocking
+func (m *PodManager) CheckVSpherePodsReady(ctx context.Context) (*VSpherePodsStatus, error) {
+	logger := klog.FromContext(ctx)
+
+	status := &VSpherePodsStatus{AllReady: true}
+
+	// Check cloud controller manager
+	ccmReady, ccmTotal, err := m.getPodReadyCount(ctx, "openshift-cloud-controller-manager",
+		labels.SelectorFromSet(map[string]string{"k8s-app": "vsphere-cloud-controller-manager"}).String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to check cloud controller manager pods: %w", err)
+	}
+	status.CloudControllerReady = ccmReady
+	status.CloudControllerTotal = ccmTotal
+	if ccmReady != ccmTotal || ccmTotal == 0 {
+		status.AllReady = false
+		status.NotReadyReason = fmt.Sprintf("cloud controller manager: %d/%d ready", ccmReady, ccmTotal)
+	}
+
+	// Check machine API controllers
+	mapiReady, mapiTotal, err := m.getPodReadyCount(ctx, "openshift-machine-api",
+		labels.SelectorFromSet(map[string]string{"api": "clusterapi"}).String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to check machine API pods: %w", err)
+	}
+	status.MachineAPIReady = mapiReady
+	status.MachineAPITotal = mapiTotal
+	if mapiReady != mapiTotal || mapiTotal == 0 {
+		status.AllReady = false
+		if status.NotReadyReason == "" {
+			status.NotReadyReason = fmt.Sprintf("machine API: %d/%d ready", mapiReady, mapiTotal)
+		}
+	}
+
+	// Check CSI driver controller pods
+	csiCtrlReady, csiCtrlTotal, err := m.getPodReadyCount(ctx, "openshift-cluster-csi-drivers",
+		labels.SelectorFromSet(map[string]string{"app": "vmware-vsphere-csi-driver-controller"}).String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to check CSI controller pods: %w", err)
+	}
+	status.CSIControllerReady = csiCtrlReady
+	status.CSIControllerTotal = csiCtrlTotal
+	if csiCtrlReady != csiCtrlTotal || csiCtrlTotal == 0 {
+		status.AllReady = false
+		if status.NotReadyReason == "" {
+			status.NotReadyReason = fmt.Sprintf("CSI controller: %d/%d ready", csiCtrlReady, csiCtrlTotal)
+		}
+	}
+
+	// Check CSI driver node pods
+	csiNodeReady, csiNodeTotal, err := m.getPodReadyCount(ctx, "openshift-cluster-csi-drivers",
+		labels.SelectorFromSet(map[string]string{"app": "vmware-vsphere-csi-driver-node"}).String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to check CSI node pods: %w", err)
+	}
+	status.CSINodeReady = csiNodeReady
+	status.CSINodeTotal = csiNodeTotal
+	if csiNodeReady != csiNodeTotal || csiNodeTotal == 0 {
+		status.AllReady = false
+		if status.NotReadyReason == "" {
+			status.NotReadyReason = fmt.Sprintf("CSI node: %d/%d ready", csiNodeReady, csiNodeTotal)
+		}
+	}
+
+	logger.V(2).Info("vSphere pods status",
+		"allReady", status.AllReady,
+		"cloudController", fmt.Sprintf("%d/%d", ccmReady, ccmTotal),
+		"machineAPI", fmt.Sprintf("%d/%d", mapiReady, mapiTotal),
+		"csiController", fmt.Sprintf("%d/%d", csiCtrlReady, csiCtrlTotal),
+		"csiNode", fmt.Sprintf("%d/%d", csiNodeReady, csiNodeTotal))
+
+	return status, nil
+}
+
 // WaitForVSpherePodsReady waits for all vSphere pods to be ready
 func (m *PodManager) WaitForVSpherePodsReady(ctx context.Context, timeout time.Duration) error {
 	logger := klog.FromContext(ctx)

@@ -21,10 +21,10 @@ import (
 	machineclient "github.com/openshift/client-go/machine/clientset/versioned"
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/backup"
-	"github.com/openshift/vsphere-migration-controller/pkg/controller/phases"
-	"github.com/openshift/vsphere-migration-controller/pkg/controller/state"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/backup"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/controller/phases"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/controller/state"
 )
 
 // MigrationController manages vSphere migrations
@@ -58,11 +58,11 @@ func NewMigrationController(
 		configClient:  configClient,
 		dynamicClient: dynamicClient,
 		scheme:        scheme,
-		workqueue:     workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "vspheremigrations"),
+		workqueue:     workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "vmwarecloudfoundationmigrations"),
 		gvr: schema.GroupVersionResource{
 			Group:    "migration.openshift.io",
 			Version:  "v1alpha1",
-			Resource: "vspheremigrations",
+			Resource: "vmwarecloudfoundationmigrations",
 		},
 	}
 
@@ -88,7 +88,7 @@ func NewMigrationController(
 	factoryController := factory.New().
 		WithSync(c.sync).
 		ResyncEvery(1*time.Minute).
-		ToController("vsphere-migration-controller", recorder)
+		ToController("vmware-cloud-foundation-migration", recorder)
 
 	return c, factoryController
 }
@@ -99,7 +99,7 @@ func (c *MigrationController) EnqueueMigration(obj interface{}) {
 
 	if unstructuredObj, ok := obj.(*unstructured.Unstructured); ok {
 		key := fmt.Sprintf("%s/%s", unstructuredObj.GetNamespace(), unstructuredObj.GetName())
-		logger.Info("Enqueuing VSphereMigration", "key", key)
+		logger.Info("Enqueuing VmwareCloudFoundationMigration", "key", key)
 		c.workqueue.Add(key)
 		return
 	}
@@ -154,18 +154,18 @@ func (c *MigrationController) syncMigrationFromKey(ctx context.Context, key stri
 		return err
 	}
 
-	logger.Info("Syncing VSphereMigration", "namespace", namespace, "name", name)
+	logger.Info("Syncing VmwareCloudFoundationMigration", "namespace", namespace, "name", name)
 
 	// Fetch the migration resource using dynamic client
 	unstructuredMigration, err := c.dynamicClient.Resource(c.gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get VSphereMigration: %w", err)
+		return fmt.Errorf("failed to get VmwareCloudFoundationMigration: %w", err)
 	}
 
 	// Convert unstructured to typed object
-	migration := &migrationv1alpha1.VSphereMigration{}
+	migration := &migrationv1alpha1.VmwareCloudFoundationMigration{}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredMigration.Object, migration); err != nil {
-		return fmt.Errorf("failed to convert unstructured to VSphereMigration: %w", err)
+		return fmt.Errorf("failed to convert unstructured to VmwareCloudFoundationMigration: %w", err)
 	}
 
 	// Sync the migration
@@ -178,12 +178,12 @@ func (c *MigrationController) syncMigrationFromKey(ctx context.Context, key stri
 }
 
 // SyncMigration is a public wrapper for testing
-func (c *MigrationController) SyncMigration(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (c *MigrationController) SyncMigration(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	return c.syncMigration(ctx, migration)
 }
 
 // migrationQueueKey generates a queue key for a migration
-func migrationQueueKey(migration *migrationv1alpha1.VSphereMigration) string {
+func migrationQueueKey(migration *migrationv1alpha1.VmwareCloudFoundationMigration) string {
 	return fmt.Sprintf("%s/%s", migration.Namespace, migration.Name)
 }
 
@@ -197,7 +197,7 @@ func migrationFromQueueKey(key string) (namespace, name string, err error) {
 }
 
 // updateMigrationStatus updates the status of a migration resource
-func (c *MigrationController) updateMigrationStatus(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (c *MigrationController) updateMigrationStatus(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 
 	// Convert typed object to unstructured

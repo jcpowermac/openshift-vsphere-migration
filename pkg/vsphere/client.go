@@ -2,6 +2,9 @@ package vsphere
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net/url"
 	"strings"
@@ -175,6 +178,42 @@ func (c *Client) GetFolder(ctx context.Context, path string) (*object.Folder, er
 	return folder, nil
 }
 
+// GetDatastore returns a datastore object
+func (c *Client) GetDatastore(ctx context.Context, path string) (*object.Datastore, error) {
+	ds, err := c.finder.Datastore(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find datastore %s: %w", path, err)
+	}
+	return ds, nil
+}
+
+// GetNetwork returns a network object
+func (c *Client) GetNetwork(ctx context.Context, path string) (object.NetworkReference, error) {
+	network, err := c.finder.Network(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find network %s: %w", path, err)
+	}
+	return network, nil
+}
+
+// GetResourcePool returns a resource pool object
+func (c *Client) GetResourcePool(ctx context.Context, path string) (*object.ResourcePool, error) {
+	rp, err := c.finder.ResourcePool(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find resource pool %s: %w", path, err)
+	}
+	return rp, nil
+}
+
+// GetVirtualMachine returns a virtual machine (template) object
+func (c *Client) GetVirtualMachine(ctx context.Context, path string) (*object.VirtualMachine, error) {
+	vm, err := c.finder.VirtualMachine(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find virtual machine %s: %w", path, err)
+	}
+	return vm, nil
+}
+
 // TagManager returns the tag manager
 func (c *Client) TagManager() *tags.Manager {
 	return c.tagManager
@@ -204,4 +243,57 @@ func (c *Client) GetRESTLogs() []RESTLogEntry {
 func (c *Client) ClearLogs() {
 	c.soapLogger.Clear()
 	c.restLogger.Clear()
+}
+
+// GetServerThumbprint fetches the SSL certificate thumbprint from a vCenter server
+// This is required for cross-vCenter vMotion operations to verify the target server's identity
+func GetServerThumbprint(ctx context.Context, serverURL string) (string, error) {
+	logger := klog.FromContext(ctx)
+
+	// Parse the server URL to extract host
+	parsedURL, err := url.Parse(serverURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse server URL: %w", err)
+	}
+
+	host := parsedURL.Host
+	// If no port specified, default to 443
+	if !strings.Contains(host, ":") {
+		host = host + ":443"
+	}
+
+	logger.V(2).Info("Fetching SSL thumbprint from server", "host", host)
+
+	// Connect with TLS to get the certificate
+	// We need to skip verification to get the cert for thumbprint calculation
+	conn, err := tls.Dial("tcp", host, &tls.Config{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to server %s: %w", host, err)
+	}
+	defer conn.Close()
+
+	// Get the server's certificate
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return "", fmt.Errorf("no certificates returned from server %s", host)
+	}
+
+	// Calculate SHA-256 thumbprint of the first (leaf) certificate
+	thumbprint := calculateThumbprint(certs[0])
+
+	logger.V(2).Info("Retrieved SSL thumbprint", "host", host, "thumbprint", thumbprint)
+	return thumbprint, nil
+}
+
+// calculateThumbprint computes the SHA-256 thumbprint of a certificate
+// and returns it in the colon-separated hex format expected by vSphere
+func calculateThumbprint(cert *x509.Certificate) string {
+	hash := sha256.Sum256(cert.Raw)
+	thumbprint := make([]string, len(hash))
+	for i, b := range hash {
+		thumbprint[i] = fmt.Sprintf("%02X", b)
+	}
+	return strings.Join(thumbprint, ":")
 }

@@ -2,12 +2,12 @@
 
 ## What Was Fixed
 
-The controller was not responding to VSphereMigration resources because:
+The controller was not responding to VmwareCloudFoundationMigration resources because:
 
-**Problem**: The controller had no informer setup - it wasn't watching for VSphereMigration resources being created or updated.
+**Problem**: The controller had no informer setup - it wasn't watching for VmwareCloudFoundationMigration resources being created or updated.
 
 **Solution**: Added complete informer infrastructure:
-1. ✅ Dynamic client to access VSphereMigration resources
+1. ✅ Dynamic client to access VmwareCloudFoundationMigration resources
 2. ✅ Informer to watch for resource changes
 3. ✅ Workqueue to handle reconciliation
 4. ✅ Event handlers for Add/Update/Delete events
@@ -29,15 +29,15 @@ The controller was not responding to VSphereMigration resources because:
 make build
 
 # 2. Run the controller (in one terminal)
-./bin/vsphere-migration-controller --kubeconfig=$HOME/.kube/config --v=2
+./bin/vmware-cloud-foundation-migration --kubeconfig=$HOME/.kube/config --v=2
 
 # 3. In another terminal, create a migration
 oc create -f deploy/examples/vcenter-120-migration.yaml
 
 # 4. Watch the first terminal for logs like:
-# "VSphereMigration added"
-# "Enqueuing VSphereMigration"
-# "Syncing VSphereMigration"
+# "VmwareCloudFoundationMigration added"
+# "Enqueuing VmwareCloudFoundationMigration"
+# "Syncing VmwareCloudFoundationMigration"
 # "Reconciling migration"
 ```
 
@@ -54,12 +54,12 @@ Starting controller
 Controller started, waiting for shutdown signal
 ```
 
-When you create a VSphereMigration, you should see:
+When you create a VmwareCloudFoundationMigration, you should see:
 
 ```
-VSphereMigration added
-Enqueuing VSphereMigration key="openshift-config/vcenter-120-migration"
-Syncing VSphereMigration namespace="openshift-config" name="vcenter-120-migration"
+VmwareCloudFoundationMigration added
+Enqueuing VmwareCloudFoundationMigration key="openshift-config/vcenter-120-migration"
+Syncing VmwareCloudFoundationMigration namespace="openshift-config" name="vcenter-120-migration"
 Reconciling migration phase="Preflight" state="Pending"
 Migration is pending, waiting for state to be set to Running
 Updated migration status phase="Preflight"
@@ -70,7 +70,7 @@ Updated migration status phase="Preflight"
 ### 1. Check the migration was created
 
 ```bash
-oc get vspheremigration -n openshift-config
+oc get vmwarecloudfoundationmigration -n openshift-config
 ```
 
 Expected output:
@@ -82,7 +82,7 @@ vcenter-120-migration    1m
 ### 2. Check the migration status
 
 ```bash
-oc get vspheremigration vcenter-120-migration -n openshift-config -o yaml
+oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config -o yaml
 ```
 
 You should see `status.phase` populated (e.g., `Preflight`)
@@ -90,15 +90,15 @@ You should see `status.phase` populated (e.g., `Preflight`)
 ### 3. Start the migration
 
 ```bash
-oc patch vspheremigration vcenter-120-migration -n openshift-config \
+oc patch vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
   --type merge -p '{"spec":{"state":"Running"}}'
 ```
 
 You should see the controller logs show:
 ```
-VSphereMigration updated
-Enqueuing VSphereMigration
-Syncing VSphereMigration
+VmwareCloudFoundationMigration updated
+Enqueuing VmwareCloudFoundationMigration
+Syncing VmwareCloudFoundationMigration
 Reconciling migration phase="Preflight" state="Running"
 Executing phase: Preflight
 ```
@@ -107,12 +107,12 @@ Executing phase: Preflight
 
 ### Controller doesn't see the migration
 
-**Symptom**: No logs when you create/update a VSphereMigration
+**Symptom**: No logs when you create/update a VmwareCloudFoundationMigration
 
 **Check**:
 1. Is the CRD installed?
    ```bash
-   oc get crd vspheremigrations.migration.openshift.io
+   oc get crd vmwarecloudfoundationmigrations.migration.openshift.io
    ```
 
 2. Is the controller connected to the cluster?
@@ -125,16 +125,16 @@ Executing phase: Preflight
 3. Is the migration in the right namespace?
    ```bash
    # Controller watches all namespaces, but example uses openshift-config
-   oc get vspheremigration --all-namespaces
+   oc get vmwarecloudfoundationmigration --all-namespaces
    ```
 
-### "Failed to get VSphereMigration" error
+### "Failed to get VmwareCloudFoundationMigration" error
 
 **Cause**: Resource might have been deleted or namespace is wrong
 
 **Fix**: Verify the migration exists:
 ```bash
-oc get vspheremigration vcenter-120-migration -n openshift-config
+oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config
 ```
 
 ### "Failed to update migration status" error
@@ -143,7 +143,7 @@ oc get vspheremigration vcenter-120-migration -n openshift-config
 
 **Fix**: Reinstall the CRD (it has `subresource:status` marker):
 ```bash
-oc delete crd vspheremigrations.migration.openshift.io
+oc delete crd vmwarecloudfoundationmigrations.migration.openshift.io
 oc create -f deploy/crds/migration.crd.yaml
 ```
 
@@ -158,7 +158,7 @@ oc create -f deploy/crds/migration.crd.yaml
 The controller now works like this:
 
 ```
-VSphereMigration Resource (create/update)
+VmwareCloudFoundationMigration Resource (create/update)
            ↓
     Kubernetes API
            ↓
@@ -183,7 +183,7 @@ VSphereMigration Resource (create/update)
 
 ## Key Code Changes
 
-### cmd/vsphere-migration-controller/main.go
+### cmd/vmware-cloud-foundation-migration/main.go
 - Added dynamic client creation
 - Set up informer factory
 - Added event handlers for Add/Update/Delete
@@ -207,7 +207,7 @@ Once you've verified the controller responds to migrations:
 
 2. **Start the migration**:
    ```bash
-   oc patch vspheremigration vcenter-120-migration -n openshift-config \
+   oc patch vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
      --type merge -p '{"spec":{"state":"Running"}}'
    ```
 
@@ -215,15 +215,15 @@ Once you've verified the controller responds to migrations:
    ```bash
    # Watch controller logs for phase execution
    # Watch migration status
-   oc get vspheremigration vcenter-120-migration -n openshift-config -w
+   oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config -w
    ```
 
 4. **Check phase logs**:
    ```bash
-   oc get vspheremigration vcenter-120-migration -n openshift-config \
+   oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
      -o jsonpath='{.status.phaseHistory}' | jq
    ```
 
 ## Happy Testing! 🎉
 
-Your controller should now properly detect and respond to VSphereMigration resources!
+Your controller should now properly detect and respond to VmwareCloudFoundationMigration resources!

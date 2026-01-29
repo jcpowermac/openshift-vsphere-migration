@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 const (
@@ -67,7 +67,7 @@ func (m *InfrastructureManager) GetSourceVCenter(ctx context.Context) (*configv1
 }
 
 // AddTargetVCenter adds the target vCenter to the infrastructure spec
-func (m *InfrastructureManager) AddTargetVCenter(ctx context.Context, infra *configv1.Infrastructure, migration *migrationv1alpha1.VSphereMigration) (*configv1.Infrastructure, error) {
+func (m *InfrastructureManager) AddTargetVCenter(ctx context.Context, infra *configv1.Infrastructure, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*configv1.Infrastructure, error) {
 	logger := klog.FromContext(ctx)
 
 	if infra.Spec.PlatformSpec.VSphere == nil {
@@ -202,6 +202,25 @@ func (m *InfrastructureManager) GetInfrastructureID(ctx context.Context) (string
 	return infra.Status.InfrastructureName, nil
 }
 
+// GetSourceFailureDomain returns the first (source) failure domain from the Infrastructure CRD
+func (m *InfrastructureManager) GetSourceFailureDomain(ctx context.Context) (*configv1.VSpherePlatformFailureDomainSpec, error) {
+	infra, err := m.Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get infrastructure: %w", err)
+	}
+
+	if infra.Spec.PlatformSpec.VSphere == nil {
+		return nil, fmt.Errorf("infrastructure is not vSphere platform")
+	}
+
+	if len(infra.Spec.PlatformSpec.VSphere.FailureDomains) == 0 {
+		return nil, fmt.Errorf("no failure domains configured in infrastructure")
+	}
+
+	// The first failure domain is the source
+	return &infra.Spec.PlatformSpec.VSphere.FailureDomains[0], nil
+}
+
 // BackupInfrastructureCRD backs up the Infrastructure CRD definition
 func (m *InfrastructureManager) BackupInfrastructureCRD(ctx context.Context) ([]byte, error) {
 	if m.apiextensionsClient == nil {
@@ -316,7 +335,7 @@ func (m *InfrastructureManager) RestoreInfrastructureCRD(ctx context.Context, ba
 
 // AddTargetVCenterWithCRDModification adds the target vCenter by modifying the CRD
 // The CRD is backed up, modified, Infrastructure is updated, then CRD is immediately restored
-func (m *InfrastructureManager) AddTargetVCenterWithCRDModification(ctx context.Context, infra *configv1.Infrastructure, migration *migrationv1alpha1.VSphereMigration) (*configv1.Infrastructure, error) {
+func (m *InfrastructureManager) AddTargetVCenterWithCRDModification(ctx context.Context, infra *configv1.Infrastructure, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*configv1.Infrastructure, error) {
 	logger := klog.FromContext(ctx)
 
 	// Backup CRD first

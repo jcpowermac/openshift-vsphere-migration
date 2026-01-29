@@ -6,7 +6,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // CreateFolderPhase creates VM folder in target vCenter
@@ -25,7 +25,7 @@ func (p *CreateFolderPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *CreateFolderPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *CreateFolderPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	if len(migration.Spec.FailureDomains) == 0 {
 		return fmt.Errorf("no failure domains specified")
 	}
@@ -33,7 +33,7 @@ func (p *CreateFolderPhase) Validate(ctx context.Context, migration *migrationv1
 }
 
 // Execute runs the phase
-func (p *CreateFolderPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *CreateFolderPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -53,6 +53,18 @@ func (p *CreateFolderPhase) Execute(ctx context.Context, migration *migrationv1a
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
 		fmt.Sprintf("Infrastructure ID: %s", infraID),
 		string(p.Name()))
+
+	// Auto-generate folder path if not specified in failure domains
+	for i := range migration.Spec.FailureDomains {
+		fd := &migration.Spec.FailureDomains[i]
+		if fd.Topology.Folder == "" {
+			fd.Topology.Folder = fmt.Sprintf("/%s/vm/%s", fd.Topology.Datacenter, infraID)
+			logger.Info("Generated folder path", "failureDomain", fd.Name, "folder", fd.Topology.Folder)
+			logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+				fmt.Sprintf("Generated folder path for %s: %s", fd.Name, fd.Topology.Folder),
+				string(p.Name()))
+		}
+	}
 
 	// Construct folder path: /{datacenter}/vm/{infrastructure-id}
 	folderName := infraID
@@ -126,7 +138,7 @@ func (p *CreateFolderPhase) Execute(ctx context.Context, migration *migrationv1a
 }
 
 // Rollback reverts the phase changes
-func (p *CreateFolderPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *CreateFolderPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back CreateFolder phase - folder will be left in place for safety")
 

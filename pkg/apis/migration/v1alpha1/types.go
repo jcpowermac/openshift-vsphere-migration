@@ -8,21 +8,21 @@ import (
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// VSphereMigration represents a migration from one vCenter to another
+// VmwareCloudFoundationMigration represents a migration from one vCenter to another
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:path=vspheremigrations,scope=Namespaced,shortName=vsm
-type VSphereMigration struct {
+// +kubebuilder:resource:path=vmwarecloudfoundationmigrations,scope=Namespaced,shortName=vcfm
+type VmwareCloudFoundationMigration struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   VSphereMigrationSpec   `json:"spec,omitempty"`
-	Status VSphereMigrationStatus `json:"status,omitempty"`
+	Spec   VmwareCloudFoundationMigrationSpec   `json:"spec,omitempty"`
+	Status VmwareCloudFoundationMigrationStatus `json:"status,omitempty"`
 }
 
-// VSphereMigrationSpec defines the desired state of VSphereMigration
+// VmwareCloudFoundationMigrationSpec defines the desired state of VmwareCloudFoundationMigration
 // +k8s:deepcopy-gen=true
-type VSphereMigrationSpec struct {
+type VmwareCloudFoundationMigrationSpec struct {
 	// State controls the workflow: Pending, Running, Paused, Rollback
 	// +kubebuilder:validation:Enum=Pending;Running;Paused;Rollback
 	// +kubebuilder:default=Pending
@@ -126,9 +126,9 @@ type ControlPlaneMachineSetConfig struct {
 	FailureDomain string `json:"failureDomain"`
 }
 
-// VSphereMigrationStatus defines the observed state of VSphereMigration
+// VmwareCloudFoundationMigrationStatus defines the observed state of VmwareCloudFoundationMigration
 // +k8s:deepcopy-gen=true
-type VSphereMigrationStatus struct {
+type VmwareCloudFoundationMigrationStatus struct {
 	// Phase is the current migration phase
 	Phase MigrationPhase `json:"phase,omitempty"`
 
@@ -149,6 +149,78 @@ type VSphereMigrationStatus struct {
 
 	// CompletionTime is when the migration completed
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
+
+	// CSIVolumeMigration tracks CSI volume migration progress
+	CSIVolumeMigration *CSIVolumeMigrationStatus `json:"csiVolumeMigration,omitempty"`
+}
+
+// CSIVolumeMigrationStatus tracks overall CSI volume migration progress
+// +k8s:deepcopy-gen=true
+type CSIVolumeMigrationStatus struct {
+	// TotalVolumes is the total number of CSI volumes to migrate
+	TotalVolumes int32 `json:"totalVolumes"`
+
+	// MigratedVolumes is the number of successfully migrated volumes
+	MigratedVolumes int32 `json:"migratedVolumes"`
+
+	// FailedVolumes is the number of volumes that failed migration
+	FailedVolumes int32 `json:"failedVolumes"`
+
+	// Volumes tracks individual volume migration states
+	Volumes []PVMigrationState `json:"volumes,omitempty"`
+}
+
+// PVMigrationState tracks individual PV migration
+// +k8s:deepcopy-gen=true
+type PVMigrationState struct {
+	// PVName is the PersistentVolume name
+	PVName string `json:"pvName"`
+
+	// PVCName is the PersistentVolumeClaim name
+	PVCName string `json:"pvcName,omitempty"`
+
+	// PVCNamespace is the PersistentVolumeClaim namespace
+	PVCNamespace string `json:"pvcNamespace,omitempty"`
+
+	// SourceVolumePath is the VMDK path on source vCenter
+	SourceVolumePath string `json:"sourceVolumePath"`
+
+	// SourceVolumeID is the FCD ID on source vCenter
+	SourceVolumeID string `json:"sourceVolumeID,omitempty"`
+
+	// TargetVolumePath is the VMDK path on target vCenter
+	TargetVolumePath string `json:"targetVolumePath,omitempty"`
+
+	// TargetVolumeID is the FCD ID on target vCenter
+	TargetVolumeID string `json:"targetVolumeID,omitempty"`
+
+	// DummyVMName is the name of the dummy VM used for vMotion
+	DummyVMName string `json:"dummyVMName,omitempty"`
+
+	// Status is the migration status: Pending, Quiesced, Relocating, Relocated, Registered, Complete, Failed
+	Status string `json:"status"`
+
+	// Message is a human-readable status message
+	Message string `json:"message,omitempty"`
+
+	// ScaledDownResources tracks resources that were scaled down for this PV
+	ScaledDownResources []ScaledResource `json:"scaledDownResources,omitempty"`
+}
+
+// ScaledResource tracks a resource that was scaled down during migration
+// +k8s:deepcopy-gen=true
+type ScaledResource struct {
+	// Kind is the resource kind (Deployment, StatefulSet, ReplicaSet, etc.)
+	Kind string `json:"kind"`
+
+	// Name is the resource name
+	Name string `json:"name"`
+
+	// Namespace is the resource namespace
+	Namespace string `json:"namespace"`
+
+	// OriginalReplicas is the replica count before scaling down
+	OriginalReplicas int32 `json:"originalReplicas"`
 }
 
 // MigrationPhase represents the current phase of migration
@@ -169,6 +241,7 @@ const (
 	PhaseMonitorHealth        MigrationPhase = "MonitorHealth"
 	PhaseCreateWorkers        MigrationPhase = "CreateWorkers"
 	PhaseRecreateCPMS         MigrationPhase = "RecreateCPMS"
+	PhaseMigrateCSIVolumes    MigrationPhase = "MigrateCSIVolumes"
 	PhaseScaleOldMachines     MigrationPhase = "ScaleOldMachines"
 	PhaseCleanup              MigrationPhase = "Cleanup"
 	PhaseVerify               MigrationPhase = "Verify"
@@ -306,9 +379,9 @@ const (
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// VSphereMigrationList contains a list of VSphereMigration
-type VSphereMigrationList struct {
+// VmwareCloudFoundationMigrationList contains a list of VmwareCloudFoundationMigration
+type VmwareCloudFoundationMigrationList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []VSphereMigration `json:"items"`
+	Items           []VmwareCloudFoundationMigration `json:"items"`
 }

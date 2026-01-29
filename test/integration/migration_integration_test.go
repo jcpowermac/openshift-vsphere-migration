@@ -9,8 +9,8 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	configfake "github.com/openshift/client-go/config/clientset/versioned/fake"
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/backup"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/backup"
 )
 
 // TestMigrationControllerSync tests the controller sync function
@@ -45,12 +45,12 @@ func TestMigrationControllerSync(t *testing.T) {
 	migrationv1alpha1.AddToScheme(scheme)
 
 	// Create migration for validation
-	migration := &migrationv1alpha1.VSphereMigration{
+	migration := &migrationv1alpha1.VmwareCloudFoundationMigration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-migration",
-			Namespace: "openshift-config",
+			Namespace: "vmware-cloud-foundation-migration",
 		},
-		Spec: migrationv1alpha1.VSphereMigrationSpec{
+		Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 			State:        migrationv1alpha1.MigrationStatePending,
 			ApprovalMode: migrationv1alpha1.ApprovalModeAutomatic,
 			TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{

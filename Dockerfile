@@ -13,19 +13,19 @@ COPY . .
 # Build the controller binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -a \
     -ldflags="-w -s" \
-    -o vsphere-migration-controller \
-    ./cmd/vsphere-migration-controller
+    -o vmware-cloud-foundation-migration \
+    ./cmd/vmware-cloud-foundation-migration
 
 # Stage 2: Runtime
 FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
 
 # Copy the binary from builder
-COPY --from=builder /workspace/vsphere-migration-controller /usr/bin/vsphere-migration-controller
+COPY --from=builder /workspace/vmware-cloud-foundation-migration /usr/bin/vmware-cloud-foundation-migration
 
 # Set permissions
-RUN chmod +x /usr/bin/vsphere-migration-controller
+RUN chmod +x /usr/bin/vmware-cloud-foundation-migration
 
 # Run as non-root user
 USER 1001
 
-ENTRYPOINT ["/usr/bin/vsphere-migration-controller"]
+ENTRYPOINT ["/usr/bin/vmware-cloud-foundation-migration"]

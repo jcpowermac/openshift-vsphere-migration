@@ -1,12 +1,12 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: vsphere-migration-controller
+  name: vmware-cloud-foundation-migration
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: vsphere-migration-controller
+  name: vmware-cloud-foundation-migration
 subjects:
 - kind: ServiceAccount
-  name: vsphere-migration-controller
-  namespace: openshift-config
+  name: vmware-cloud-foundation-migration
+  namespace: vmware-cloud-foundation-migration

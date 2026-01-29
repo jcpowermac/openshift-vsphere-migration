@@ -8,7 +8,7 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // CreateWorkersPhase creates new worker machines in target vCenter
@@ -27,7 +27,7 @@ func (p *CreateWorkersPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *CreateWorkersPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *CreateWorkersPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	if migration.Spec.MachineSetConfig.Replicas <= 0 {
 		return fmt.Errorf("worker replicas must be greater than 0")
 	}
@@ -38,7 +38,7 @@ func (p *CreateWorkersPhase) Validate(ctx context.Context, migration *migrationv
 }
 
 // Execute runs the phase
-func (p *CreateWorkersPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *CreateWorkersPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -65,7 +65,7 @@ func (p *CreateWorkersPhase) Execute(ctx context.Context, migration *migrationv1
 	if foundFD == nil {
 		return &PhaseResult{
 			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: fmt.Sprintf("failure domain %s not found in VSphereMigration CR", targetFD),
+			Message: fmt.Sprintf("failure domain %s not found in VmwareCloudFoundationMigration CR", targetFD),
 			Logs:    logs,
 		}, fmt.Errorf("failure domain %s not found", targetFD)
 	}
@@ -103,20 +103,68 @@ func (p *CreateWorkersPhase) Execute(ctx context.Context, migration *migrationv1
 	existingMS, err := machineManager.GetMachineSet(ctx, newMachineSetName)
 
 	if err == nil && existingMS != nil {
-		logger.Info("MachineSet already exists, verifying readiness",
+		logger.Info("MachineSet already exists, checking readiness",
 			"name", newMachineSetName)
 		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
 			fmt.Sprintf("MachineSet %s already exists (idempotent)", newMachineSetName),
 			string(p.Name()))
 
-		// Wait for existing MachineSet to be ready
-		readyMachines, totalMachines, err := machineManager.WaitForMachinesReady(ctx, newMachineSetName, 30*time.Minute)
+		// Check machines ready (non-blocking)
+		machinesComplete, readyMachines, totalMachines, err := machineManager.CheckMachinesReady(ctx, newMachineSetName)
 		if err != nil {
 			return &PhaseResult{
 				Status:  migrationv1alpha1.PhaseStatusFailed,
-				Message: "Existing MachineSet not ready: " + err.Error(),
+				Message: "Failed to check machines: " + err.Error(),
 				Logs:    logs,
 			}, err
+		}
+
+		if !machinesComplete {
+			msg := fmt.Sprintf("Waiting for machines: %d/%d ready", readyMachines, totalMachines)
+			logger.Info(msg)
+			logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, msg, string(p.Name()))
+
+			progress := int32(0)
+			if totalMachines > 0 {
+				progress = int32(float64(readyMachines) / float64(totalMachines) * 50)
+			}
+
+			return &PhaseResult{
+				Status:       migrationv1alpha1.PhaseStatusRunning,
+				Message:      msg,
+				Progress:     progress,
+				Logs:         logs,
+				RequeueAfter: 30 * time.Second,
+			}, nil
+		}
+
+		// Check nodes ready (non-blocking)
+		nodesComplete, readyNodes, totalNodes, err := machineManager.CheckNodesReady(ctx, newMachineSetName)
+		if err != nil {
+			return &PhaseResult{
+				Status:  migrationv1alpha1.PhaseStatusFailed,
+				Message: "Failed to check nodes: " + err.Error(),
+				Logs:    logs,
+			}, err
+		}
+
+		if !nodesComplete {
+			msg := fmt.Sprintf("Waiting for nodes: %d/%d ready", readyNodes, totalNodes)
+			logger.Info(msg)
+			logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, msg, string(p.Name()))
+
+			progress := int32(50)
+			if totalNodes > 0 {
+				progress = 50 + int32(float64(readyNodes)/float64(totalNodes)*50)
+			}
+
+			return &PhaseResult{
+				Status:       migrationv1alpha1.PhaseStatusRunning,
+				Message:      msg,
+				Progress:     progress,
+				Logs:         logs,
+				RequeueAfter: 30 * time.Second,
+			}, nil
 		}
 
 		// MachineSet already exists and is ready
@@ -169,55 +217,21 @@ func (p *CreateWorkersPhase) Execute(ctx context.Context, migration *migrationv1
 		fmt.Sprintf("Created MachineSet %s with %d replicas", newMachineSet.Name, migration.Spec.MachineSetConfig.Replicas),
 		string(p.Name()))
 
-	// Step 3: Wait for machines to be provisioned
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Waiting for machines to be provisioned",
-		string(p.Name()))
-
-	timeout := 30 * time.Minute
-	readyMachines, totalMachines, err := machineManager.WaitForMachinesReady(ctx, newMachineSet.Name, timeout)
-	if err != nil {
-		return &PhaseResult{
-			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: fmt.Sprintf("Machines not ready: %v", err),
-			Logs:    logs,
-		}, err
-	}
-
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		fmt.Sprintf("All %d machines are provisioned", readyMachines),
-		string(p.Name()))
-
-	// Step 4: Wait for nodes to join cluster
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Waiting for nodes to join cluster and become Ready",
-		string(p.Name()))
-
-	readyNodes, totalNodes, err := machineManager.WaitForNodesReady(ctx, newMachineSet.Name, timeout)
-	if err != nil {
-		return &PhaseResult{
-			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: fmt.Sprintf("Nodes not ready: %v", err),
-			Logs:    logs,
-		}, err
-	}
-
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		fmt.Sprintf("All %d nodes are Ready (%d machines, %d nodes)", readyNodes, totalMachines, totalNodes),
-		string(p.Name()))
-
-	logger.Info("Successfully created all worker machines")
+	// Return running status - next reconcile will check machine/node readiness
+	msg := fmt.Sprintf("Created MachineSet %s, waiting for machines to provision", newMachineSet.Name)
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, msg, string(p.Name()))
 
 	return &PhaseResult{
-		Status:   migrationv1alpha1.PhaseStatusCompleted,
-		Message:  fmt.Sprintf("Successfully created MachineSet with %d ready nodes", readyNodes),
-		Progress: 100,
-		Logs:     logs,
+		Status:       migrationv1alpha1.PhaseStatusRunning,
+		Message:      msg,
+		Progress:     10,
+		Logs:         logs,
+		RequeueAfter: 30 * time.Second,
 	}, nil
 }
 
 // Rollback reverts the phase changes
-func (p *CreateWorkersPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *CreateWorkersPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back CreateWorkers phase - deleting new worker MachineSet")
 
@@ -244,7 +258,7 @@ func (p *CreateWorkersPhase) Rollback(ctx context.Context, migration *migrationv
 // Helper functions that would be implemented in pkg/openshift/machines.go
 
 // createMachineSet creates a new MachineSet for the target vCenter
-// func createMachineSet(name string, migration *migrationv1alpha1.VSphereMigration) *machinev1beta1.MachineSet {
+// func createMachineSet(name string, migration *migrationv1alpha1.VmwareCloudFoundationMigration) *machinev1beta1.MachineSet {
 // 	// Get template from existing MachineSet
 // 	// Modify to use target vCenter failure domain
 // 	// Set desired replicas

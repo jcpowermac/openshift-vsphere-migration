@@ -2,26 +2,30 @@ package phases
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/openshift"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/metadata"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/openshift"
 )
 
 // CleanupPhase removes source vCenter configuration
 type CleanupPhase struct {
-	executor      *PhaseExecutor
-	configManager *openshift.ConfigMapManager
-	podManager    *openshift.PodManager
+	executor        *PhaseExecutor
+	configManager   *openshift.ConfigMapManager
+	podManager      *openshift.PodManager
+	metadataManager *metadata.MetadataManager
 }
 
 // NewCleanupPhase creates a new cleanup phase
 func NewCleanupPhase(executor *PhaseExecutor) *CleanupPhase {
 	return &CleanupPhase{
-		executor:      executor,
-		configManager: openshift.NewConfigMapManager(executor.kubeClient),
-		podManager:    openshift.NewPodManager(executor.kubeClient),
+		executor:        executor,
+		configManager:   openshift.NewConfigMapManager(executor.kubeClient),
+		podManager:      openshift.NewPodManager(executor.kubeClient),
+		metadataManager: metadata.NewMetadataManager(executor.kubeClient),
 	}
 }
 
@@ -31,12 +35,12 @@ func (p *CleanupPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *CleanupPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *CleanupPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	return nil
 }
 
 // Execute runs the phase
-func (p *CleanupPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *CleanupPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -152,6 +156,48 @@ func (p *CleanupPhase) Execute(ctx context.Context, migration *migrationv1alpha1
 		"Cleanup completed successfully",
 		string(p.Name()))
 
+	// Generate installer metadata.json
+	logger.Info("Generating installer metadata.json")
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+		"Generating installer metadata.json",
+		string(p.Name()))
+
+	// Get infrastructure for metadata
+	infraForMeta, infraErr := p.executor.infraManager.Get(ctx)
+	if infraErr != nil {
+		logger.Error(infraErr, "Failed to get infrastructure for metadata generation")
+		// Not critical - continue without metadata
+	} else {
+		// Get credentials from target secret
+		targetSecret, targetSecretErr := p.executor.secretManager.GetTargetVCenterCredentials(ctx, migration)
+		if targetSecretErr != nil {
+			logger.Error(targetSecretErr, "Failed to get target credentials for metadata")
+		} else {
+			// Build credentials map
+			credentials := make(map[string]string)
+			for key, value := range targetSecret.Data {
+				credentials[key] = string(value)
+			}
+
+			// Generate metadata
+			meta, metaErr := p.metadataManager.GenerateMetadata(ctx, migration, infraForMeta, credentials)
+			if metaErr != nil {
+				logger.Error(metaErr, "Failed to generate metadata")
+			} else {
+				// Save to ConfigMap in the same namespace as the migration
+				configMapName := metadata.GetMetadataConfigMapName(migration.Name)
+				saveErr := p.metadataManager.SaveToConfigMap(ctx, meta, migration.Namespace, configMapName)
+				if saveErr != nil {
+					logger.Error(saveErr, "Failed to save metadata ConfigMap")
+				} else {
+					logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+						fmt.Sprintf("Generated metadata.json in ConfigMap %s/%s", migration.Namespace, configMapName),
+						string(p.Name()))
+				}
+			}
+		}
+	}
+
 	logger.Info("Successfully cleaned up source vCenter configuration")
 
 	return &PhaseResult{
@@ -163,7 +209,7 @@ func (p *CleanupPhase) Execute(ctx context.Context, migration *migrationv1alpha1
 }
 
 // Rollback reverts the phase changes
-func (p *CleanupPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *CleanupPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back Cleanup phase - restoring source vCenter configuration")
 

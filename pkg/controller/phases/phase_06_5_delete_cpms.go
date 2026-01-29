@@ -5,7 +5,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // DeleteCPMSPhase deletes the Control Plane Machine Set before infrastructure update
@@ -26,12 +26,12 @@ func (p *DeleteCPMSPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *DeleteCPMSPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *DeleteCPMSPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	return nil
 }
 
 // Execute runs the phase
-func (p *DeleteCPMSPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *DeleteCPMSPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -65,7 +65,7 @@ func (p *DeleteCPMSPhase) Execute(ctx context.Context, migration *migrationv1alp
 }
 
 // Rollback reverts the phase changes
-func (p *DeleteCPMSPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *DeleteCPMSPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back DeleteCPMS phase - restoring CPMS")
 

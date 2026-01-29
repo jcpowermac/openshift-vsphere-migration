@@ -20,12 +20,19 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	machinev1beta1 "github.com/openshift/api/machine/v1beta1"
 	machineclient "github.com/openshift/client-go/machine/clientset/versioned"
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 const (
 	MachineAPINamespace = "openshift-machine-api"
 )
+
+// cpmsGVR is the GroupVersionResource for ControlPlaneMachineSet
+var cpmsGVR = schema.GroupVersionResource{
+	Group:    "machine.openshift.io",
+	Version:  "v1",
+	Resource: "controlplanemachinesets",
+}
 
 // MachineManager manages Machine API operations
 type MachineManager struct {
@@ -49,7 +56,7 @@ func NewMachineManagerWithClients(kubeClient kubernetes.Interface, machineClient
 }
 
 // CreateWorkerMachineSet creates a new worker MachineSet in the target vCenter
-func (m *MachineManager) CreateWorkerMachineSet(ctx context.Context, name string, migration *migrationv1alpha1.VSphereMigration, template *machinev1beta1.MachineSet, infraID string) (*machinev1beta1.MachineSet, error) {
+func (m *MachineManager) CreateWorkerMachineSet(ctx context.Context, name string, migration *migrationv1alpha1.VmwareCloudFoundationMigration, template *machinev1beta1.MachineSet, infraID string) (*machinev1beta1.MachineSet, error) {
 	logger := klog.FromContext(ctx)
 
 	if m.machineClient == nil {
@@ -108,7 +115,7 @@ func (m *MachineManager) CreateWorkerMachineSet(ctx context.Context, name string
 		logger.Error(nil, "Template field is empty in failure domain",
 			"failureDomain", targetFailureDomain.Name,
 			"topology", fmt.Sprintf("%+v", targetFailureDomain.Topology))
-		return nil, fmt.Errorf("template not specified in failure domain %s - check VSphereMigration CR topology.template field",
+		return nil, fmt.Errorf("template not specified in failure domain %s - check VmwareCloudFoundationMigration CR topology.template field",
 			targetFailureDomain.Name)
 	}
 
@@ -274,7 +281,9 @@ func (m *MachineManager) GetMachineSet(ctx context.Context, name string) (*machi
 	return m.machineClient.MachineV1beta1().MachineSets(MachineAPINamespace).Get(ctx, name, metav1.GetOptions{})
 }
 
-// GetMachineSetsByVCenter returns MachineSets for a specific vCenter
+// GetMachineSetsByVCenter returns MachineSets for a specific vCenter.
+// If vcenterServer is empty, returns all MachineSets (useful for getting templates).
+// If vcenterServer is specified, filters to only MachineSets targeting that vCenter.
 func (m *MachineManager) GetMachineSetsByVCenter(ctx context.Context, vcenterServer string) ([]*machinev1beta1.MachineSet, error) {
 	logger := klog.FromContext(ctx)
 
@@ -286,6 +295,16 @@ func (m *MachineManager) GetMachineSetsByVCenter(ctx context.Context, vcenterSer
 	machineSetList, err := m.machineClient.MachineV1beta1().MachineSets(MachineAPINamespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list MachineSets: %w", err)
+	}
+
+	// If no vCenter specified, return all MachineSets (for template purposes)
+	if vcenterServer == "" {
+		var result []*machinev1beta1.MachineSet
+		for i := range machineSetList.Items {
+			result = append(result, &machineSetList.Items[i])
+		}
+		logger.Info("Found all MachineSets", "count", len(result))
+		return result, nil
 	}
 
 	// Filter by vCenter server in providerSpec
@@ -503,14 +522,6 @@ func (m *MachineManager) GetControlPlaneMachineSet(ctx context.Context) (*unstru
 		return nil, fmt.Errorf("dynamic client not initialized")
 	}
 
-	// Define GVR for ControlPlaneMachineSet
-	// Note: We still use dynamic client here because we need unstructured for backup
-	cpmsGVR := schema.GroupVersionResource{
-		Group:    "machine.openshift.io",
-		Version:  "v1",
-		Resource: "controlplanemachinesets",
-	}
-
 	// Get CPMS using dynamic client
 	cpms, err := m.dynamicClient.Resource(cpmsGVR).Namespace(MachineAPINamespace).Get(ctx, "cluster", metav1.GetOptions{})
 	if err != nil {
@@ -531,14 +542,6 @@ func (m *MachineManager) DeleteControlPlaneMachineSet(ctx context.Context) error
 		return fmt.Errorf("dynamic client not initialized")
 	}
 
-	// Define GVR for ControlPlaneMachineSet
-	// Note: Using dynamic client because ControlPlaneMachineSet is in machine.openshift.io/v1 (not v1beta1)
-	cpmsGVR := schema.GroupVersionResource{
-		Group:    "machine.openshift.io",
-		Version:  "v1",
-		Resource: "controlplanemachinesets",
-	}
-
 	// Delete CPMS using dynamic client
 	err := m.dynamicClient.Resource(cpmsGVR).Namespace(MachineAPINamespace).Delete(ctx, "cluster", metav1.DeleteOptions{})
 	if err != nil {
@@ -553,12 +556,6 @@ func (m *MachineManager) DeleteControlPlaneMachineSet(ctx context.Context) error
 // WaitForCPMSDeletion waits for CPMS to be fully deleted
 func (m *MachineManager) WaitForCPMSDeletion(ctx context.Context, timeout time.Duration) error {
 	logger := klog.FromContext(ctx)
-
-	cpmsGVR := schema.GroupVersionResource{
-		Group:    "machine.openshift.io",
-		Version:  "v1",
-		Resource: "controlplanemachinesets",
-	}
 
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(5 * time.Second)
@@ -585,12 +582,6 @@ func (m *MachineManager) WaitForCPMSDeletion(ctx context.Context, timeout time.D
 // WaitForCPMSInactive waits for CPMS to become Inactive state
 func (m *MachineManager) WaitForCPMSInactive(ctx context.Context, timeout time.Duration) error {
 	logger := klog.FromContext(ctx)
-
-	cpmsGVR := schema.GroupVersionResource{
-		Group:    "machine.openshift.io",
-		Version:  "v1",
-		Resource: "controlplanemachinesets",
-	}
 
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(5 * time.Second)
@@ -627,17 +618,11 @@ func (m *MachineManager) WaitForCPMSInactive(ctx context.Context, timeout time.D
 }
 
 // UpdateCPMSFailureDomain updates an existing CPMS with new failure domain and sets it to Active
-func (m *MachineManager) UpdateCPMSFailureDomain(ctx context.Context, migration *migrationv1alpha1.VSphereMigration, infraID string) error {
+func (m *MachineManager) UpdateCPMSFailureDomain(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration, infraID string) error {
 	logger := klog.FromContext(ctx)
 
 	if m.dynamicClient == nil {
 		return fmt.Errorf("dynamic client not initialized")
-	}
-
-	cpmsGVR := schema.GroupVersionResource{
-		Group:    "machine.openshift.io",
-		Version:  "v1",
-		Resource: "controlplanemachinesets",
 	}
 
 	// Get current CPMS
@@ -688,7 +673,7 @@ func (m *MachineManager) UpdateCPMSFailureDomain(ctx context.Context, migration 
 }
 
 // CreateControlPlaneMachineSet creates a new Control Plane Machine Set
-func (m *MachineManager) CreateControlPlaneMachineSet(ctx context.Context, migration *migrationv1alpha1.VSphereMigration, template interface{}, infraID string) error {
+func (m *MachineManager) CreateControlPlaneMachineSet(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration, template interface{}, infraID string) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Creating Control Plane Machine Set",
 		"failureDomain", migration.Spec.ControlPlaneMachineSetConfig.FailureDomain)
@@ -734,12 +719,6 @@ func (m *MachineManager) CreateControlPlaneMachineSet(ctx context.Context, migra
 		"state", "Active")
 
 	// Create CPMS
-	cpmsGVR := schema.GroupVersionResource{
-		Group:    "machine.openshift.io",
-		Version:  "v1",
-		Resource: "controlplanemachinesets",
-	}
-
 	_, err := m.dynamicClient.Resource(cpmsGVR).Namespace(MachineAPINamespace).Create(ctx, cpmsTemplate, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create CPMS: %w", err)
@@ -747,6 +726,43 @@ func (m *MachineManager) CreateControlPlaneMachineSet(ctx context.Context, migra
 
 	logger.Info("Successfully created Control Plane Machine Set")
 	return nil
+}
+
+// CheckControlPlaneRolloutStatus checks if control plane rollout is complete without blocking
+func (m *MachineManager) CheckControlPlaneRolloutStatus(ctx context.Context) (complete bool, replicas, updatedReplicas, readyReplicas int32, err error) {
+	logger := klog.FromContext(ctx)
+
+	if m.dynamicClient == nil {
+		return false, 0, 0, 0, fmt.Errorf("dynamic client not initialized")
+	}
+
+	cpms, err := m.dynamicClient.Resource(cpmsGVR).Namespace(MachineAPINamespace).Get(ctx, "cluster", metav1.GetOptions{})
+	if err != nil {
+		return false, 0, 0, 0, fmt.Errorf("failed to get CPMS: %w", err)
+	}
+
+	status, found, err := unstructured.NestedMap(cpms.Object, "status")
+	if err != nil || !found {
+		return false, 0, 0, 0, fmt.Errorf("failed to get CPMS status")
+	}
+
+	replicasInt, _, _ := unstructured.NestedInt64(status, "replicas")
+	updatedReplicasInt, _, _ := unstructured.NestedInt64(status, "updatedReplicas")
+	readyReplicasInt, _, _ := unstructured.NestedInt64(status, "readyReplicas")
+
+	replicas = int32(replicasInt)
+	updatedReplicas = int32(updatedReplicasInt)
+	readyReplicas = int32(readyReplicasInt)
+
+	complete = replicas > 0 && replicas == updatedReplicas && replicas == readyReplicas
+
+	logger.V(2).Info("Control plane rollout status",
+		"complete", complete,
+		"replicas", replicas,
+		"updatedReplicas", updatedReplicas,
+		"readyReplicas", readyReplicas)
+
+	return complete, replicas, updatedReplicas, readyReplicas, nil
 }
 
 // WaitForControlPlaneRollout waits for the control plane rollout to complete
@@ -761,13 +777,6 @@ func (m *MachineManager) WaitForControlPlaneRollout(ctx context.Context, timeout
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	// Define GVR for ControlPlaneMachineSet
-	cpmsGVR := schema.GroupVersionResource{
-		Group:    "machine.openshift.io",
-		Version:  "v1",
-		Resource: "controlplanemachinesets",
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -777,31 +786,13 @@ func (m *MachineManager) WaitForControlPlaneRollout(ctx context.Context, timeout
 				return fmt.Errorf("timeout waiting for control plane rollout")
 			}
 
-			// Get CPMS status
-			cpms, err := m.dynamicClient.Resource(cpmsGVR).Namespace(MachineAPINamespace).Get(ctx, "cluster", metav1.GetOptions{})
+			complete, replicas, updatedReplicas, readyReplicas, err := m.CheckControlPlaneRolloutStatus(ctx)
 			if err != nil {
-				logger.V(2).Info("Error getting CPMS status", "error", err)
+				logger.V(2).Info("Error checking CPMS status", "error", err)
 				continue
 			}
 
-			// Check status fields
-			status, found, err := unstructured.NestedMap(cpms.Object, "status")
-			if err != nil || !found {
-				logger.V(2).Info("CPMS status not available yet")
-				continue
-			}
-
-			// Check if replicas are updated
-			replicas, _, _ := unstructured.NestedInt64(status, "replicas")
-			updatedReplicas, _, _ := unstructured.NestedInt64(status, "updatedReplicas")
-			readyReplicas, _, _ := unstructured.NestedInt64(status, "readyReplicas")
-
-			logger.V(2).Info("Control plane rollout status",
-				"replicas", replicas,
-				"updatedReplicas", updatedReplicas,
-				"readyReplicas", readyReplicas)
-
-			if replicas > 0 && updatedReplicas == replicas && readyReplicas == replicas {
+			if complete {
 				logger.Info("Control plane rollout complete",
 					"replicas", replicas,
 					"updatedReplicas", updatedReplicas,
@@ -815,4 +806,44 @@ func (m *MachineManager) WaitForControlPlaneRollout(ctx context.Context, timeout
 				"readyReplicas", readyReplicas)
 		}
 	}
+}
+
+// CheckMachinesReady checks if all machines in a MachineSet are ready without blocking
+func (m *MachineManager) CheckMachinesReady(ctx context.Context, machineSetName string) (complete bool, ready, total int32, err error) {
+	logger := klog.FromContext(ctx)
+
+	ready, total, err = m.getMachineStatus(ctx, machineSetName)
+	if err != nil {
+		return false, 0, 0, err
+	}
+
+	complete = ready == total && total > 0
+
+	logger.V(2).Info("Machine readiness status",
+		"machineSet", machineSetName,
+		"complete", complete,
+		"ready", ready,
+		"total", total)
+
+	return complete, ready, total, nil
+}
+
+// CheckNodesReady checks if nodes corresponding to machines are ready without blocking
+func (m *MachineManager) CheckNodesReady(ctx context.Context, machineSetName string) (complete bool, ready, total int32, err error) {
+	logger := klog.FromContext(ctx)
+
+	ready, total, err = m.getNodeStatus(ctx, machineSetName)
+	if err != nil {
+		return false, 0, 0, err
+	}
+
+	complete = ready == total && total > 0
+
+	logger.V(2).Info("Node readiness status",
+		"machineSet", machineSetName,
+		"complete", complete,
+		"ready", ready,
+		"total", total)
+
+	return complete, ready, total, nil
 }

@@ -28,7 +28,7 @@ This directory contains the migration manifest for migrating an OpenShift cluste
 
 This script will:
 1. ✓ Verify cluster connectivity
-2. ✓ Install the VSphereMigration CRD
+2. ✓ Install the VmwareCloudFoundationMigration CRD
 3. ✓ Create the credentials secret
 4. ✓ Create the migration resource in Pending state
 
@@ -42,7 +42,7 @@ oc apply -f deploy/crds/migration.crd.yaml
 oc create -f deploy/examples/vcenter-120-migration.yaml
 
 # 3. Verify creation
-oc get vspheremigration vcenter-120-migration -n openshift-config
+oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config
 ```
 
 ## Starting the Migration
@@ -52,7 +52,7 @@ The migration is created in `Pending` state and will not start automatically.
 **To start the migration:**
 
 ```bash
-oc patch vspheremigration vcenter-120-migration -n openshift-config \
+oc patch vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
   --type merge -p '{"spec":{"state":"Running"}}'
 ```
 
@@ -62,25 +62,25 @@ oc patch vspheremigration vcenter-120-migration -n openshift-config \
 
 ```bash
 # Watch for status changes
-oc get vspheremigration vcenter-120-migration -n openshift-config -w
+oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config -w
 
 # View current phase
-oc get vspheremigration vcenter-120-migration -n openshift-config \
+oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
   -o jsonpath='{.status.phase}'
 
 # View detailed status
-oc describe vspheremigration vcenter-120-migration -n openshift-config
+oc describe vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config
 ```
 
 ### View phase logs
 
 ```bash
 # Get all phase logs
-oc get vspheremigration vcenter-120-migration -n openshift-config \
+oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
   -o jsonpath='{.status.phaseHistory[*]}' | jq
 
 # Get current phase state
-oc get vspheremigration vcenter-120-migration -n openshift-config \
+oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
   -o jsonpath='{.status.currentPhaseState}' | jq
 ```
 
@@ -107,14 +107,14 @@ The migration will execute through 15 phases:
 ## Pausing the Migration
 
 ```bash
-oc patch vspheremigration vcenter-120-migration -n openshift-config \
+oc patch vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
   --type merge -p '{"spec":{"state":"Paused"}}'
 ```
 
 ## Triggering Rollback
 
 ```bash
-oc patch vspheremigration vcenter-120-migration -n openshift-config \
+oc patch vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config \
   --type merge -p '{"spec":{"state":"Rollback"}}'
 ```
 
@@ -150,7 +150,7 @@ This failure domain maps to:
 ### View controller logs
 
 ```bash
-oc logs -n openshift-config deployment/vsphere-migration-controller -f
+oc logs -n openshift-config deployment/vmware-cloud-foundation-migration -f
 ```
 
 ### Check secret
@@ -162,8 +162,8 @@ oc get secret vcenter-120-creds -n openshift-config -o yaml
 ### Validate CRD
 
 ```bash
-oc get crd vspheremigrations.migration.openshift.io
-oc describe crd vspheremigrations.migration.openshift.io
+oc get crd vmwarecloudfoundationmigrations.migration.openshift.io
+oc describe crd vmwarecloudfoundationmigrations.migration.openshift.io
 ```
 
 ### Common Issues
@@ -188,13 +188,13 @@ To remove the migration resource:
 
 ```bash
 # Delete migration resource
-oc delete vspheremigration vcenter-120-migration -n openshift-config
+oc delete vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config
 
 # Delete credentials secret
 oc delete secret vcenter-120-creds -n openshift-config
 
 # Optionally, remove the CRD (removes all migrations)
-oc delete crd vspheremigrations.migration.openshift.io
+oc delete crd vmwarecloudfoundationmigrations.migration.openshift.io
 ```
 
 ## Support

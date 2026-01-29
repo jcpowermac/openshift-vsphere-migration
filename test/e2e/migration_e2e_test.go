@@ -13,7 +13,7 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	configfake "github.com/openshift/client-go/config/clientset/versioned/fake"
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // TestFullMigration tests a complete migration from source to target vCenter
@@ -65,12 +65,12 @@ func TestFullMigration(t *testing.T) {
 	migrationv1alpha1.AddToScheme(scheme)
 
 	// Create migration
-	migration := &migrationv1alpha1.VSphereMigration{
+	migration := &migrationv1alpha1.VmwareCloudFoundationMigration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "e2e-migration",
-			Namespace: "openshift-config",
+			Namespace: "vmware-cloud-foundation-migration",
 		},
-		Spec: migrationv1alpha1.VSphereMigrationSpec{
+		Spec: migrationv1alpha1.VmwareCloudFoundationMigrationSpec{
 			State:        migrationv1alpha1.MigrationStateRunning,
 			ApprovalMode: migrationv1alpha1.ApprovalModeAutomatic,
 			TargetVCenterCredentialsSecret: migrationv1alpha1.SecretReference{
@@ -179,7 +179,7 @@ func TestVSphereLogging(t *testing.T) {
 }
 
 // Helper function to wait for migration to reach a phase
-func waitForPhase(ctx context.Context, migration *migrationv1alpha1.VSphereMigration, phase migrationv1alpha1.MigrationPhase, timeout time.Duration) error {
+func waitForPhase(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration, phase migrationv1alpha1.MigrationPhase, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if migration.Status.Phase == phase {
@@ -191,7 +191,7 @@ func waitForPhase(ctx context.Context, migration *migrationv1alpha1.VSphereMigra
 }
 
 // Helper function to approve a phase
-func approvePhase(migration *migrationv1alpha1.VSphereMigration) {
+func approvePhase(migration *migrationv1alpha1.VmwareCloudFoundationMigration) {
 	if migration.Status.CurrentPhaseState != nil {
 		migration.Status.CurrentPhaseState.Approved = true
 	}

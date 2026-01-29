@@ -2,8 +2,8 @@
 
 # Build variables
 BINDIR := bin
-BINARY := vsphere-migration-controller
-MAIN := cmd/vsphere-migration-controller/main.go
+BINARY := vmware-cloud-foundation-migration
+MAIN := cmd/vmware-cloud-foundation-migration/main.go
 
 # Go parameters
 GOCMD := go

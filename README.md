@@ -73,11 +73,11 @@ oc apply -f deploy/controller.yaml
 
 ### Create Migration Resource
 
-Create a `VSphereMigration` resource to start a migration:
+Create a `VmwareCloudFoundationMigration` resource to start a migration:
 
 ```yaml
 apiVersion: migration.openshift.io/v1alpha1
-kind: VSphereMigration
+kind: VmwareCloudFoundationMigration
 metadata:
   name: my-migration
   namespace: openshift-config
@@ -124,7 +124,7 @@ spec:
 
 ```bash
 # Set state to Running
-oc patch vspheremigration my-migration -n openshift-config \
+oc patch vmwarecloudfoundationmigration my-migration -n openshift-config \
   --type merge -p '{"spec":{"state":"Running"}}'
 ```
 
@@ -132,13 +132,13 @@ oc patch vspheremigration my-migration -n openshift-config \
 
 ```bash
 # Watch migration status
-oc get vspheremigration my-migration -n openshift-config -w
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config -w
 
 # View detailed status
-oc get vspheremigration my-migration -n openshift-config -o yaml
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config -o yaml
 
 # Check current phase
-oc get vspheremigration my-migration -n openshift-config \
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config \
   -o jsonpath='{.status.phase}'
 ```
 
@@ -148,7 +148,7 @@ For manual approval, set `approvalMode: Manual` and approve each phase:
 
 ```bash
 # Check if approval needed
-oc get vspheremigration my-migration -n openshift-config \
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config \
   -o jsonpath='{.status.currentPhaseState}'
 
 # Approve phase (implementation TBD - would patch currentPhaseState.approved)
@@ -158,7 +158,7 @@ oc get vspheremigration my-migration -n openshift-config \
 
 ```bash
 # Trigger manual rollback
-oc patch vspheremigration my-migration -n openshift-config \
+oc patch vmwarecloudfoundationmigration my-migration -n openshift-config \
   --type merge -p '{"spec":{"state":"Rollback"}}'
 ```
 
@@ -185,7 +185,7 @@ make manifests
 This generates `deploy/crds/migration.crd.yaml` with the correct metadata:
 - Group: `migration.openshift.io`
 - Version: `v1alpha1`
-- Kind: `VSphereMigration`
+- Kind: `VmwareCloudFoundationMigration`
 
 ### Run Tests
 
@@ -207,7 +207,7 @@ E2E_TEST=true make test-e2e
 make build
 
 # Run controller locally (requires kubeconfig)
-./bin/vsphere-migration-controller \
+./bin/vmware-cloud-foundation-migration \
   --kubeconfig=$HOME/.kube/config \
   --v=2
 ```
@@ -228,8 +228,8 @@ make vet
 ## Project Structure
 
 ```
-vsphere-migration-controller/
-├── cmd/vsphere-migration-controller/  # Main entrypoint
+vmware-cloud-foundation-migration/
+├── cmd/vmware-cloud-foundation-migration/  # Main entrypoint
 ├── pkg/
 │   ├── apis/migration/v1alpha1/       # CRD definitions
 │   ├── controller/                    # Controller logic
@@ -246,9 +246,9 @@ vsphere-migration-controller/
 
 ## API Reference
 
-### VSphereMigration
+### VmwareCloudFoundationMigration
 
-The `VSphereMigration` custom resource defines a migration from one vCenter to another.
+The `VmwareCloudFoundationMigration` custom resource defines a migration from one vCenter to another.
 
 #### Spec Fields
 
@@ -275,7 +275,7 @@ The `VSphereMigration` custom resource defines a migration from one vCenter to a
 ### View Controller Logs
 
 ```bash
-oc logs -n openshift-config deployment/vsphere-migration-controller -f
+oc logs -n openshift-config deployment/vmware-cloud-foundation-migration -f
 ```
 
 ### View Phase Logs
@@ -283,7 +283,7 @@ oc logs -n openshift-config deployment/vsphere-migration-controller -f
 Phase logs are stored in the migration status:
 
 ```bash
-oc get vspheremigration my-migration -n openshift-config \
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config \
   -o jsonpath='{.status.phaseHistory[*].logs}' | jq
 ```
 

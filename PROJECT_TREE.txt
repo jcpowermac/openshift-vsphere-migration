@@ -1,14 +1,14 @@
-vsphere-migration-controller/
+vmware-cloud-foundation-migration/
 │
 ├── cmd/
-│   └── vsphere-migration-controller/
+│   └── vmware-cloud-foundation-migration/
 │       └── main.go                                  # Controller entry point
 │
 ├── pkg/
 │   ├── apis/
 │   │   └── migration/
 │   │       └── v1alpha1/
-│   │           ├── types.go                         # VSphereMigration CRD definition
+│   │           ├── types.go                         # VmwareCloudFoundationMigration CRD definition
 │   │           └── register.go                      # API registration
 │   │
 │   ├── backup/
@@ -67,7 +67,7 @@ vsphere-migration-controller/
 │
 ├── deploy/
 │   ├── crds/
-│   │   └── migration.crd.yaml                       # VSphereMigration CRD manifest
+│   │   └── migration.crd.yaml                       # VmwareCloudFoundationMigration CRD manifest
 │   ├── rbac/
 │   │   ├── serviceaccount.yaml                      # ServiceAccount
 │   │   ├── clusterrole.yaml                         # ClusterRole with permissions

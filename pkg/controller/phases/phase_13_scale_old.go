@@ -7,7 +7,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // ScaleOldMachinesPhase scales down old worker machines
@@ -28,12 +28,12 @@ func (p *ScaleOldMachinesPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *ScaleOldMachinesPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *ScaleOldMachinesPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	return nil
 }
 
 // Execute runs the phase
-func (p *ScaleOldMachinesPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *ScaleOldMachinesPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -131,7 +131,7 @@ func (p *ScaleOldMachinesPhase) Execute(ctx context.Context, migration *migratio
 }
 
 // Rollback reverts the phase changes
-func (p *ScaleOldMachinesPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *ScaleOldMachinesPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back ScaleOldMachines phase - restoring old MachineSets")
 

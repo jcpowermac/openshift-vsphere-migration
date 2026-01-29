@@ -10,7 +10,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 const (
@@ -34,7 +34,7 @@ func (m *ConfigMapManager) GetCloudProviderConfig(ctx context.Context) (*corev1.
 }
 
 // AddTargetVCenterToConfig adds target vCenter to cloud-provider-config
-func (m *ConfigMapManager) AddTargetVCenterToConfig(ctx context.Context, cm *corev1.ConfigMap, migration *migrationv1alpha1.VSphereMigration) (*corev1.ConfigMap, error) {
+func (m *ConfigMapManager) AddTargetVCenterToConfig(ctx context.Context, cm *corev1.ConfigMap, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*corev1.ConfigMap, error) {
 	logger := klog.FromContext(ctx)
 
 	if cm.Data == nil {

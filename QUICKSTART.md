@@ -66,7 +66,7 @@ Generated CRD will be at `deploy/crds/migration.crd.yaml`
 make build
 ```
 
-Binary will be in `bin/vsphere-migration-controller`
+Binary will be in `bin/vmware-cloud-foundation-migration`
 
 ### 3. Run Tests
 
@@ -111,7 +111,7 @@ package phases
 
 import (
     "context"
-    migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+    migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 type MyPhase struct {
@@ -126,12 +126,12 @@ func (p *MyPhase) Name() migrationv1alpha1.MigrationPhase {
     return migrationv1alpha1.PhaseMyPhase
 }
 
-func (p *MyPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *MyPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
     // Validate prerequisites
     return nil
 }
 
-func (p *MyPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *MyPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
     logs := make([]migrationv1alpha1.LogEntry, 0)
 
     // Do work
@@ -146,7 +146,7 @@ func (p *MyPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSph
     }, nil
 }
 
-func (p *MyPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *MyPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
     // Revert changes
     return nil
 }
@@ -180,7 +180,7 @@ func TestMyPhase_Execute(t *testing.T) {
     executor := phases.NewPhaseExecutor(kubeClient, configClient, backup.NewBackupManager(scheme), nil)
     phase := phases.NewMyPhase(executor)
 
-    migration := &migrationv1alpha1.VSphereMigration{
+    migration := &migrationv1alpha1.VmwareCloudFoundationMigration{
         // ... setup migration
     }
 
@@ -202,7 +202,7 @@ func TestMyPhase_Execute(t *testing.T) {
 Once controller integration is complete:
 
 ```bash
-./bin/vsphere-migration-controller \
+./bin/vmware-cloud-foundation-migration \
   --kubeconfig=$HOME/.kube/config \
   --v=2
 ```
@@ -230,7 +230,7 @@ Note: Source vCenter configuration is automatically read from the existing Infra
 
 ```yaml
 apiVersion: migration.openshift.io/v1alpha1
-kind: VSphereMigration
+kind: VmwareCloudFoundationMigration
 metadata:
   name: my-migration
   namespace: openshift-config
@@ -262,7 +262,7 @@ spec:
 3. Start the migration:
 
 ```bash
-oc patch vspheremigration my-migration -n openshift-config \
+oc patch vmwarecloudfoundationmigration my-migration -n openshift-config \
   --type merge -p '{"spec":{"state":"Running"}}'
 ```
 
@@ -270,13 +270,13 @@ oc patch vspheremigration my-migration -n openshift-config \
 
 ```bash
 # Watch migration status
-oc get vspheremigration my-migration -n openshift-config -w
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config -w
 
 # View detailed status
-oc get vspheremigration my-migration -n openshift-config -o yaml
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config -o yaml
 
 # Check phase logs
-oc get vspheremigration my-migration -n openshift-config \
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config \
   -o jsonpath='{.status.phaseHistory[*]}' | jq
 ```
 
@@ -313,7 +313,7 @@ See `IMPLEMENTATION_STATUS.md` for detailed status.
    - Follow the pattern from existing phases
 
 2. **Complete controller integration**
-   - Add informers in `cmd/vsphere-migration-controller/main.go`
+   - Add informers in `cmd/vmware-cloud-foundation-migration/main.go`
    - Implement proper status updates
 
 3. **Write comprehensive tests**

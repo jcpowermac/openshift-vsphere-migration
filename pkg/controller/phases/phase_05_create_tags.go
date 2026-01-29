@@ -6,8 +6,8 @@ import (
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/vsphere"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/vsphere"
 )
 
 // CreateTagsPhase creates vSphere tags for failure domains
@@ -26,7 +26,7 @@ func (p *CreateTagsPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *CreateTagsPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *CreateTagsPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	if len(migration.Spec.FailureDomains) == 0 {
 		return fmt.Errorf("no failure domains specified")
 	}
@@ -34,7 +34,7 @@ func (p *CreateTagsPhase) Validate(ctx context.Context, migration *migrationv1al
 }
 
 // Execute runs the phase
-func (p *CreateTagsPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *CreateTagsPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -143,7 +143,7 @@ func (p *CreateTagsPhase) Execute(ctx context.Context, migration *migrationv1alp
 }
 
 // Rollback reverts the phase changes
-func (p *CreateTagsPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *CreateTagsPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rollback for CreateTags phase - tags will remain (not harmful)")
 	// Tags are not harmful to leave behind, so we don't delete them

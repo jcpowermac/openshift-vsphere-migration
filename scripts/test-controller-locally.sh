@@ -10,10 +10,10 @@ echo "=== Testing vSphere Migration Controller Locally ==="
 echo ""
 
 # Check if controller binary exists
-if [ ! -f "$PROJECT_ROOT/bin/vsphere-migration-controller" ]; then
+if [ ! -f "$PROJECT_ROOT/bin/vmware-cloud-foundation-migration" ]; then
     echo "Building controller..."
     cd "$PROJECT_ROOT"
-    go build -o bin/vsphere-migration-controller cmd/vsphere-migration-controller/main.go
+    go build -o bin/vmware-cloud-foundation-migration cmd/vmware-cloud-foundation-migration/main.go
     echo "✓ Controller built"
 fi
 
@@ -44,7 +44,7 @@ echo ""
 
 # Check if CRD is installed
 echo "Checking if CRD is installed..."
-if ! oc get crd vspheremigrations.migration.openshift.io &> /dev/null; then
+if ! oc get crd vmwarecloudfoundationmigrations.migration.openshift.io &> /dev/null; then
     echo "CRD not found. Installing..."
     oc apply -f "$PROJECT_ROOT/deploy/crds/migration.crd.yaml"
     echo "✓ CRD installed"
@@ -56,7 +56,7 @@ echo ""
 echo "=== Starting Controller ==="
 echo ""
 echo "The controller will:"
-echo "1. Watch for VSphereMigration resources in all namespaces"
+echo "1. Watch for VmwareCloudFoundationMigration resources in all namespaces"
 echo "2. Reconcile migrations when created/updated"
 echo "3. Log all activity to stdout"
 echo ""
@@ -72,6 +72,6 @@ echo "========================================"
 echo ""
 
 # Run the controller with verbose logging
-exec "$PROJECT_ROOT/bin/vsphere-migration-controller" \
+exec "$PROJECT_ROOT/bin/vmware-cloud-foundation-migration" \
     --kubeconfig="$KUBECONFIG" \
     --v=2

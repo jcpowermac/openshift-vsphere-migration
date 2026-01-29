@@ -17,7 +17,7 @@ This document confirms the complete implementation of the vSphere Migration Cont
 ### Core Architecture (100% Complete)
 
 #### API Definitions
-- ✅ VSphereMigration CRD with comprehensive spec and status
+- ✅ VmwareCloudFoundationMigration CRD with comprehensive spec and status
 - ✅ All migration phases defined
 - ✅ Support for automated and manual approval modes
 - ✅ Phase history tracking with structured logging
@@ -313,7 +313,7 @@ This document confirms the complete implementation of the vSphere Migration Cont
 - ✅ Production readiness assessment
 
 #### Example Resources
-- ✅ Complete example VSphereMigration YAML
+- ✅ Complete example VmwareCloudFoundationMigration YAML
 - ✅ Example secrets for vCenter credentials
 - ✅ Inline documentation and comments
 
@@ -392,8 +392,8 @@ This document confirms the complete implementation of the vSphere Migration Cont
 
 ### Source Code
 ```
-vsphere-migration-controller/
-├── cmd/vsphere-migration-controller/main.go       [✅ Complete]
+vmware-cloud-foundation-migration/
+├── cmd/vmware-cloud-foundation-migration/main.go       [✅ Complete]
 ├── pkg/
 │   ├── apis/migration/v1alpha1/                   [✅ Complete - 2 files]
 │   ├── backup/                                    [✅ Complete - 2 files]
@@ -440,17 +440,17 @@ The vSphere Migration Controller is **fully implemented and ready for deployment
 
 ```bash
 # Start migration
-oc patch vspheremigration my-migration -n openshift-config \
+oc patch vmwarecloudfoundationmigration my-migration -n openshift-config \
   --type merge -p '{"spec":{"state":"Running"}}'
 
 # Monitor progress
-oc get vspheremigration my-migration -n openshift-config -w
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config -w
 
 # View detailed status
-oc get vspheremigration my-migration -n openshift-config -o yaml
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config -o yaml
 
 # Check phase logs
-oc get vspheremigration my-migration -n openshift-config \
+oc get vmwarecloudfoundationmigration my-migration -n openshift-config \
   -o jsonpath='{.status.phaseHistory[*].logs}' | jq
 ```
 

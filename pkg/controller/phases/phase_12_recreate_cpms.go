@@ -2,11 +2,12 @@ package phases
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // RecreateCPMSPhase recreates the Control Plane Machine Set
@@ -27,12 +28,12 @@ func (p *RecreateCPMSPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *RecreateCPMSPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *RecreateCPMSPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	return nil
 }
 
 // Execute runs the phase
-func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -41,17 +42,7 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 
 	machineManager := p.executor.GetMachineManager()
 
-	// Delete existing CPMS (triggers auto-recreation as Inactive)
-	logger.Info("Deleting Control Plane Machine Set to trigger recreation as Inactive")
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Deleting CPMS to trigger recreation as Inactive",
-		string(p.Name()))
-
-	if err := machineManager.DeleteControlPlaneMachineSet(ctx); err != nil {
-		logger.Error(err, "Failed to delete CPMS (may not exist)")
-		// Continue - CPMS may not have existed
-	}
-
+	// CPMS was already deleted in Phase 6 (DeleteCPMS) and should be auto-recreated as Inactive
 	// Wait for CPMS to become Inactive (auto-recreated)
 	logger.Info("Waiting for CPMS to become Inactive")
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
@@ -99,18 +90,39 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 		"Updated CPMS and set to Active",
 		string(p.Name()))
 
-	// Monitor rollout
-	logger.Info("Monitoring control plane rollout (this may take 30-60 minutes)")
+	// Check rollout status (non-blocking to avoid leader election timeout)
+	logger.Info("Checking control plane rollout status")
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Monitoring control plane rollout",
+		"Checking control plane rollout status",
 		string(p.Name()))
 
-	if err := machineManager.WaitForControlPlaneRollout(ctx, 60*time.Minute); err != nil {
+	complete, replicas, updatedReplicas, readyReplicas, err := machineManager.CheckControlPlaneRolloutStatus(ctx)
+	if err != nil {
 		return &PhaseResult{
 			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: "Control plane rollout failed: " + err.Error(),
+			Message: "Failed to check control plane rollout status: " + err.Error(),
 			Logs:    logs,
 		}, err
+	}
+
+	if !complete {
+		msg := fmt.Sprintf("Waiting for control plane rollout: %d/%d updated, %d/%d ready",
+			updatedReplicas, replicas, readyReplicas, replicas)
+		logger.Info(msg)
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, msg, string(p.Name()))
+
+		progress := int32(0)
+		if replicas > 0 {
+			progress = int32(float64(readyReplicas) / float64(replicas) * 100)
+		}
+
+		return &PhaseResult{
+			Status:       migrationv1alpha1.PhaseStatusRunning,
+			Message:      msg,
+			Progress:     progress,
+			Logs:         logs,
+			RequeueAfter: 30 * time.Second,
+		}, nil
 	}
 
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
@@ -128,7 +140,7 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 }
 
 // Rollback reverts the phase changes
-func (p *RecreateCPMSPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *RecreateCPMSPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back RecreateCPMS phase")
 

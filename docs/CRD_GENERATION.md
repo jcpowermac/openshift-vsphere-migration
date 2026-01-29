@@ -37,16 +37,16 @@ var (
 The main resource type includes markers that define CRD-specific configuration:
 
 ```go
-// VSphereMigration represents a migration from one vCenter to another
+// VmwareCloudFoundationMigration represents a migration from one vCenter to another
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:path=vspheremigrations,scope=Namespaced,shortName=vsm
-type VSphereMigration struct {
+// +kubebuilder:resource:path=vmwarecloudfoundationmigrations,scope=Namespaced,shortName=vsm
+type VmwareCloudFoundationMigration struct {
     metav1.TypeMeta   `json:",inline"`
     metav1.ObjectMeta `json:"metadata,omitempty"`
 
-    Spec   VSphereMigrationSpec   `json:"spec,omitempty"`
-    Status VSphereMigrationStatus `json:"status,omitempty"`
+    Spec   VmwareCloudFoundationMigrationSpec   `json:"spec,omitempty"`
+    Status VmwareCloudFoundationMigrationStatus `json:"status,omitempty"`
 }
 ```
 
@@ -91,16 +91,16 @@ controller-gen crd:crdVersions=v1 paths="./pkg/apis/migration/v1alpha1" output:c
 
 ## Generated CRD Output
 
-The generated CRD is saved to `deploy/crds/migration.openshift.io_vspheremigrations.yaml` with:
+The generated CRD is saved to `deploy/crds/migration.openshift.io_vmwarecloudfoundationmigrations.yaml` with:
 
-- `metadata.name`: `vspheremigrations.migration.openshift.io`
+- `metadata.name`: `vmwarecloudfoundationmigrations.migration.openshift.io`
 - `spec.group`: `migration.openshift.io`
 - `spec.versions[0].name`: `v1alpha1`
 
 After generation, you can rename it to `migration.crd.yaml` for consistency:
 
 ```bash
-mv deploy/crds/migration.openshift.io_vspheremigrations.yaml deploy/crds/migration.crd.yaml
+mv deploy/crds/migration.openshift.io_vmwarecloudfoundationmigrations.yaml deploy/crds/migration.crd.yaml
 ```
 
 ## Validation
@@ -117,7 +117,7 @@ grep -E "^  name:|^  group:|^    - name:" deploy/crds/migration.crd.yaml
 
 Expected output:
 ```
-  name: vspheremigrations.migration.openshift.io
+  name: vmwarecloudfoundationmigrations.migration.openshift.io
   group: migration.openshift.io
     - name: v1alpha1
 ```
@@ -129,7 +129,7 @@ Expected output:
 **Symptom:**
 ```yaml
 metadata:
-  name: vspheremigrations.
+  name: vmwarecloudfoundationmigrations.
 spec:
   group: ""
   versions:
@@ -146,7 +146,7 @@ spec:
 
 **Symptom:**
 ```
-* metadata.name: Invalid value: "vspheremigrations.": a lowercase RFC 1123 subdomain must consist...
+* metadata.name: Invalid value: "vmwarecloudfoundationmigrations.": a lowercase RFC 1123 subdomain must consist...
 * spec.group: Required value
 ```
 
@@ -165,7 +165,7 @@ spec:
 
 ### Generated Files
 
-1. **`deploy/crds/migration.crd.yaml`** - The generated CRD manifest (or `migration.openshift.io_vspheremigrations.yaml`)
+1. **`deploy/crds/migration.crd.yaml`** - The generated CRD manifest (or `migration.openshift.io_vmwarecloudfoundationmigrations.yaml`)
 
 ## Controller-gen Version
 

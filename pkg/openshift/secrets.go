@@ -8,6 +8,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
+
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 const (
@@ -134,4 +136,10 @@ func (m *SecretManager) GetVCenterCredsFromSecret(ctx context.Context, namespace
 	}
 
 	return string(usernameBytes), string(passwordBytes), nil
+}
+
+// GetTargetVCenterCredentials retrieves the target vCenter credentials secret from the migration spec
+func (m *SecretManager) GetTargetVCenterCredentials(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*corev1.Secret, error) {
+	secretRef := migration.Spec.TargetVCenterCredentialsSecret
+	return m.client.CoreV1().Secrets(secretRef.Namespace).Get(ctx, secretRef.Name, metav1.GetOptions{})
 }

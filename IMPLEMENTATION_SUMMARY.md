@@ -17,7 +17,7 @@ I have implemented the foundation of a production-ready Kubernetes controller fo
 **Complete and production-ready:**
 
 1. **CRD API Definition** (`pkg/apis/migration/v1alpha1/`)
-   - Comprehensive `VSphereMigration` resource with all spec and status fields
+   - Comprehensive `VmwareCloudFoundationMigration` resource with all spec and status fields
    - Support for automated and manual approval modes
    - Phase history tracking with structured logs
    - Backup manifest storage for rollback
@@ -123,10 +123,10 @@ I have implemented the foundation of a production-ready Kubernetes controller fo
 
 ### Controller Integration
 
-- [ ] Complete informer setup for VSphereMigration resources
+- [ ] Complete informer setup for VmwareCloudFoundationMigration resources
 - [ ] Event handler and work queue
 - [ ] Proper status update mechanism
-- [ ] Client generation for VSphereMigration CRD
+- [ ] Client generation for VmwareCloudFoundationMigration CRD
 
 ### Testing
 
@@ -263,7 +263,7 @@ make build
 make test-unit
 
 # The following would work once controller integration is complete:
-# ./bin/vsphere-migration-controller --kubeconfig=~/.kube/config
+# ./bin/vmware-cloud-foundation-migration --kubeconfig=~/.kube/config
 ```
 
 ## Code Quality
@@ -316,14 +316,14 @@ This implementation provides a **solid, production-quality foundation** for the 
 ## File Listing
 
 ```
-vsphere-migration-controller/
+vmware-cloud-foundation-migration/
 ├── README.md                                    ✅ Complete
 ├── IMPLEMENTATION_STATUS.md                     ✅ Complete
 ├── IMPLEMENTATION_SUMMARY.md                    ✅ Complete (this file)
 ├── Makefile                                     ✅ Complete
 ├── go.mod                                       ✅ Complete
 │
-├── cmd/vsphere-migration-controller/
+├── cmd/vmware-cloud-foundation-migration/
 │   └── main.go                                  🟡 Needs informer setup
 │
 ├── pkg/

@@ -6,7 +6,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // UpdateSecretsPhase adds target vCenter credentials to secrets
@@ -25,7 +25,7 @@ func (p *UpdateSecretsPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *UpdateSecretsPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *UpdateSecretsPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	if migration.Spec.TargetVCenterCredentialsSecret.Name == "" {
 		return fmt.Errorf("target vCenter credentials secret name is empty")
 	}
@@ -36,7 +36,7 @@ func (p *UpdateSecretsPhase) Validate(ctx context.Context, migration *migrationv
 }
 
 // Execute runs the phase
-func (p *UpdateSecretsPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *UpdateSecretsPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -117,7 +117,7 @@ func (p *UpdateSecretsPhase) Execute(ctx context.Context, migration *migrationv1
 }
 
 // Rollback reverts the phase changes
-func (p *UpdateSecretsPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *UpdateSecretsPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rolling back UpdateSecrets phase")
 

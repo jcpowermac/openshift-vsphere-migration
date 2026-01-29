@@ -7,13 +7,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/controller/phases"
-	"github.com/openshift/vsphere-migration-controller/pkg/util"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/controller/phases"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/util"
 )
 
 // syncMigration is the main reconciliation loop
-func (c *MigrationController) syncMigration(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (c *MigrationController) syncMigration(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx).WithValues("migration", migration.Name, "namespace", migration.Namespace)
 	ctx = klog.NewContext(ctx, logger)
 
@@ -96,7 +96,13 @@ func (c *MigrationController) syncMigration(ctx context.Context, migration *migr
 
 		// Check if should rollback automatically
 		if migration.Spec.RollbackOnFailure {
-			logger.Info("Triggering automatic rollback")
+			logger.Info("========================================")
+			logger.Info("AUTOMATIC ROLLBACK TRIGGERED")
+			logger.Info("========================================")
+			logger.Info("Phase failed, initiating automatic rollback",
+				"failedPhase", currentPhase,
+				"failureReason", result.Message,
+				"error", err)
 			if rollbackErr := c.stateMachine.InitiateRollback(ctx, migration, c.getAllPhases()); rollbackErr != nil {
 				logger.Error(rollbackErr, "Automatic rollback failed")
 			}
@@ -170,6 +176,8 @@ func (c *MigrationController) getPhaseImplementation(phase migrationv1alpha1.Mig
 		return phases.NewCreateWorkersPhase(c.phaseExecutor)
 	case migrationv1alpha1.PhaseRecreateCPMS:
 		return phases.NewRecreateCPMSPhase(c.phaseExecutor)
+	case migrationv1alpha1.PhaseMigrateCSIVolumes:
+		return phases.NewMigrateCSIVolumesPhase(c.phaseExecutor)
 	case migrationv1alpha1.PhaseScaleOldMachines:
 		return phases.NewScaleOldMachinesPhase(c.phaseExecutor)
 	case migrationv1alpha1.PhaseCleanup:
@@ -197,6 +205,7 @@ func (c *MigrationController) getAllPhases() []phases.Phase {
 		phases.NewMonitorHealthPhase(c.phaseExecutor),
 		phases.NewCreateWorkersPhase(c.phaseExecutor),
 		phases.NewRecreateCPMSPhase(c.phaseExecutor),
+		phases.NewMigrateCSIVolumesPhase(c.phaseExecutor),
 		phases.NewScaleOldMachinesPhase(c.phaseExecutor),
 		phases.NewCleanupPhase(c.phaseExecutor),
 		phases.NewVerifyPhase(c.phaseExecutor),

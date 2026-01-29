@@ -11,10 +11,10 @@ import (
 
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	machineclient "github.com/openshift/client-go/machine/clientset/versioned"
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/backup"
-	"github.com/openshift/vsphere-migration-controller/pkg/openshift"
-	"github.com/openshift/vsphere-migration-controller/pkg/vsphere"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/backup"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/openshift"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/vsphere"
 )
 
 // Phase represents a migration phase
@@ -23,13 +23,13 @@ type Phase interface {
 	Name() migrationv1alpha1.MigrationPhase
 
 	// Validate checks if the phase can be executed
-	Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error
+	Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error
 
 	// Execute runs the phase
-	Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error)
+	Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error)
 
 	// Rollback reverts the phase changes
-	Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error
+	Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error
 }
 
 // PhaseResult represents the result of a phase execution
@@ -89,7 +89,7 @@ func NewPhaseExecutor(
 }
 
 // ExecutePhase executes a phase and updates the migration status
-func (e *PhaseExecutor) ExecutePhase(ctx context.Context, phase Phase, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (e *PhaseExecutor) ExecutePhase(ctx context.Context, phase Phase, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	// Initialize phase state
 	phaseState := &migrationv1alpha1.PhaseState{
 		Name:     phase.Name(),
@@ -187,7 +187,7 @@ func (e *PhaseExecutor) GetVSphereClient(ctx context.Context, server string) (*v
 
 // GetVSphereClientFromMigration creates a vSphere client using credentials from the migration spec
 // Use this for target vCenter which may have credentials in a custom secret
-func (e *PhaseExecutor) GetVSphereClientFromMigration(ctx context.Context, migration *migrationv1alpha1.VSphereMigration, server string) (*vsphere.Client, error) {
+func (e *PhaseExecutor) GetVSphereClientFromMigration(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration, server string) (*vsphere.Client, error) {
 	// Determine which secret to use based on the server
 	var username, password string
 	var err error

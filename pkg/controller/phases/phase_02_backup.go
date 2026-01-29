@@ -7,7 +7,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // BackupPhase backs up critical resources
@@ -26,12 +26,12 @@ func (p *BackupPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *BackupPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *BackupPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	return nil
 }
 
 // Execute runs the phase
-func (p *BackupPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *BackupPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -104,24 +104,8 @@ func (p *BackupPhase) Execute(ctx context.Context, migration *migrationv1alpha1.
 
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Backed up cloud-provider-config", string(p.Name()))
 
-	// Backup Control Plane Machine Set from openshift-machine-api
-	machineManager := p.executor.GetMachineManager()
-	cpms, err := machineManager.GetControlPlaneMachineSet(ctx)
-	if err != nil {
-		logger.Info("Failed to get CPMS (may not exist), skipping backup", "error", err)
-		logs = AddLog(logs, migrationv1alpha1.LogLevelWarning, "CPMS not found in openshift-machine-api, skipping backup", string(p.Name()))
-	} else if cpms != nil {
-		cpmsBackup, err := p.executor.backupManager.BackupResource(ctx, cpms, "ControlPlaneMachineSet")
-		if err != nil {
-			return &PhaseResult{
-				Status:  migrationv1alpha1.PhaseStatusFailed,
-				Message: "Failed to backup CPMS: " + err.Error(),
-				Logs:    logs,
-			}, err
-		}
-		p.executor.backupManager.AddBackupToMigration(migration, cpmsBackup)
-		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Backed up Control Plane Machine Set from openshift-machine-api", string(p.Name()))
-	}
+	// Note: CPMS is not backed up as it will be recreated with new configuration
+	// after infrastructure update. The new CPMS will use the updated failure domains.
 
 	// TODO: Backup machines
 
@@ -137,7 +121,7 @@ func (p *BackupPhase) Execute(ctx context.Context, migration *migrationv1alpha1.
 }
 
 // Rollback reverts the phase changes
-func (p *BackupPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *BackupPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	// Backup phase doesn't modify resources, no rollback needed
 	return nil
 }

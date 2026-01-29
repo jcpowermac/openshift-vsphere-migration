@@ -36,8 +36,8 @@ echo "✓ Namespace openshift-config ready"
 echo ""
 
 # Step 2: Install CRD
-echo "Step 2: Installing VSphereMigration CRD..."
-if oc get crd vspheremigrations.migration.openshift.io &> /dev/null; then
+echo "Step 2: Installing VmwareCloudFoundationMigration CRD..."
+if oc get crd vmwarecloudfoundationmigrations.migration.openshift.io &> /dev/null; then
     echo "  CRD already exists, updating..."
     oc apply -f "$PROJECT_ROOT/deploy/crds/migration.crd.yaml"
 else
@@ -67,10 +67,10 @@ echo "✓ Credentials secret created"
 echo ""
 
 # Step 4: Create migration resource
-echo "Step 4: Creating VSphereMigration resource..."
-if oc get vspheremigration vcenter-120-migration -n openshift-config &> /dev/null; then
+echo "Step 4: Creating VmwareCloudFoundationMigration resource..."
+if oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config &> /dev/null; then
     echo "  Migration resource already exists"
-    echo "  To recreate, run: oc delete vspheremigration vcenter-120-migration -n openshift-config"
+    echo "  To recreate, run: oc delete vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config"
     echo "  Then run this script again"
 else
     oc create -f "$PROJECT_ROOT/deploy/examples/vcenter-120-migration.yaml"
@@ -86,14 +86,14 @@ echo "Status: Pending (not started)"
 echo ""
 echo "Next steps:"
 echo "1. Verify the migration configuration:"
-echo "   oc get vspheremigration vcenter-120-migration -n openshift-config -o yaml"
+echo "   oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config -o yaml"
 echo ""
 echo "2. When ready to start the migration, set state to Running:"
-echo "   oc patch vspheremigration vcenter-120-migration -n openshift-config --type merge -p '{\"spec\":{\"state\":\"Running\"}}'"
+echo "   oc patch vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config --type merge -p '{\"spec\":{\"state\":\"Running\"}}'"
 echo ""
 echo "3. Monitor migration progress:"
-echo "   oc get vspheremigration vcenter-120-migration -n openshift-config -w"
+echo "   oc get vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config -w"
 echo ""
 echo "4. View detailed status:"
-echo "   oc describe vspheremigration vcenter-120-migration -n openshift-config"
+echo "   oc describe vmwarecloudfoundationmigration vcenter-120-migration -n openshift-config"
 echo ""

@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // BackupManager manages resource backups
@@ -120,7 +120,7 @@ func (m *BackupManager) BackupResource(ctx context.Context, obj client.Object, r
 }
 
 // AddBackupToMigration adds a backup manifest to the migration status
-func (m *BackupManager) AddBackupToMigration(migration *migrationv1alpha1.VSphereMigration, backup *migrationv1alpha1.BackupManifest) {
+func (m *BackupManager) AddBackupToMigration(migration *migrationv1alpha1.VmwareCloudFoundationMigration, backup *migrationv1alpha1.BackupManifest) {
 	// Check if backup already exists
 	for i, existing := range migration.Status.BackupManifests {
 		if existing.ResourceType == backup.ResourceType &&
@@ -137,7 +137,7 @@ func (m *BackupManager) AddBackupToMigration(migration *migrationv1alpha1.VSpher
 }
 
 // GetBackup retrieves a backup manifest from the migration
-func (m *BackupManager) GetBackup(migration *migrationv1alpha1.VSphereMigration, resourceType, name, namespace string) (*migrationv1alpha1.BackupManifest, error) {
+func (m *BackupManager) GetBackup(migration *migrationv1alpha1.VmwareCloudFoundationMigration, resourceType, name, namespace string) (*migrationv1alpha1.BackupManifest, error) {
 	for _, backup := range migration.Status.BackupManifests {
 		if backup.ResourceType == resourceType &&
 			backup.Name == name &&

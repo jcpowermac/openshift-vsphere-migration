@@ -12,8 +12,8 @@ This document tracks the implementation status of the vSphere Migration Controll
 
 ### API Definitions (pkg/apis/migration/v1alpha1/)
 - [x] types.go - Complete CRD definition with:
-  - VSphereMigration spec (all fields)
-  - VSphereMigration status (all fields)
+  - VmwareCloudFoundationMigration spec (all fields)
+  - VmwareCloudFoundationMigration status (all fields)
   - All enums and constants
   - PhaseHistoryEntry, PhaseState, LogEntry, BackupManifest types
 - [x] register.go - API registration
@@ -68,7 +68,7 @@ This document tracks the implementation status of the vSphere Migration Controll
 - [x] phase_07_update_infra.go - Infrastructure CRD update
 
 ### Main Entry Point
-- [x] cmd/vsphere-migration-controller/main.go - Application entry point
+- [x] cmd/vmware-cloud-foundation-migration/main.go - Application entry point
 
 ### Tests
 - [x] test/unit/phases_test.go - Basic unit tests for phases
@@ -112,7 +112,7 @@ Additional managers needed:
   - Wait for pods to be ready
 
 ### Controller Integration
-- [ ] Informer setup in main.go for VSphereMigration resources
+- [ ] Informer setup in main.go for VmwareCloudFoundationMigration resources
 - [ ] Event handling and queuing
 - [ ] Status update mechanism
 - [ ] Complete integration with library-go factory
@@ -137,7 +137,7 @@ Additional managers needed:
 
 ### Code Generation
 - [ ] Deep copy generation for API types
-- [ ] Client generation for VSphereMigration resources
+- [ ] Client generation for VmwareCloudFoundationMigration resources
 - [ ] Informer generation
 - [ ] Lister generation
 
@@ -188,7 +188,7 @@ Additional managers needed:
 1. `pkg/controller/phases/phase_11_create_workers.go` - Worker machine creation
 2. `pkg/controller/phases/phase_12_recreate_cpms.go` - Control plane recreation
 3. `pkg/openshift/machines.go` - Machine API operations
-4. `cmd/vsphere-migration-controller/main.go` - Complete informer setup
+4. `cmd/vmware-cloud-foundation-migration/main.go` - Complete informer setup
 
 ### High Priority
 5. `pkg/controller/phases/phase_10_monitor_health.go` - Health monitoring

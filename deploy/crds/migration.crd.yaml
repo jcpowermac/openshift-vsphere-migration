@@ -4,22 +4,22 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.0
-  name: vspheremigrations.migration.openshift.io
+  name: vmwarecloudfoundationmigrations.migration.openshift.io
 spec:
   group: migration.openshift.io
   names:
-    kind: VSphereMigration
-    listKind: VSphereMigrationList
-    plural: vspheremigrations
+    kind: VmwareCloudFoundationMigration
+    listKind: VmwareCloudFoundationMigrationList
+    plural: vmwarecloudfoundationmigrations
     shortNames:
-    - vsm
-    singular: vspheremigration
+    - vcfm
+    singular: vmwarecloudfoundationmigration
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: VSphereMigration represents a migration from one vCenter to another
+        description: VmwareCloudFoundationMigration represents a migration from one vCenter to another
         properties:
           apiVersion:
             description: |-
@@ -39,7 +39,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: VSphereMigrationSpec defines the desired state of VSphereMigration
+            description: VmwareCloudFoundationMigrationSpec defines the desired state of VmwareCloudFoundationMigration
             properties:
               approvalMode:
                 default: Automatic
@@ -201,7 +201,7 @@ spec:
             - targetVCenterCredentialsSecret
             type: object
           status:
-            description: VSphereMigrationStatus defines the observed state of VSphereMigration
+            description: VmwareCloudFoundationMigrationStatus defines the observed state of VmwareCloudFoundationMigration
             properties:
               backupManifests:
                 description: BackupManifests stores backups for rollback

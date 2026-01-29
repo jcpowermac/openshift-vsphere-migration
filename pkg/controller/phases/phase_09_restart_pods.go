@@ -2,12 +2,13 @@ package phases
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/openshift"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/openshift"
 )
 
 // RestartPodsPhase restarts vSphere-related pods
@@ -30,12 +31,12 @@ func (p *RestartPodsPhase) Name() migrationv1alpha1.MigrationPhase {
 }
 
 // Validate checks if the phase can be executed
-func (p *RestartPodsPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *RestartPodsPhase) Validate(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	return nil
 }
 
 // Execute runs the phase
-func (p *RestartPodsPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) (*PhaseResult, error) {
+func (p *RestartPodsPhase) Execute(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
@@ -55,18 +56,33 @@ func (p *RestartPodsPhase) Execute(ctx context.Context, migration *migrationv1al
 		"Triggered restart of vSphere pods",
 		string(p.Name()))
 
-	// Wait for pods to be ready
-	logger.Info("Waiting for vSphere pods to be ready")
+	// Check if pods are ready (non-blocking to avoid leader election timeout)
+	logger.Info("Checking vSphere pods readiness")
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Waiting for vSphere pods to be ready",
+		"Checking vSphere pods readiness",
 		string(p.Name()))
 
-	if err := p.podManager.WaitForVSpherePodsReady(ctx, 10*time.Minute); err != nil {
+	status, err := p.podManager.CheckVSpherePodsReady(ctx)
+	if err != nil {
 		return &PhaseResult{
 			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: "vSphere pods did not become ready: " + err.Error(),
+			Message: "Failed to check vSphere pods: " + err.Error(),
 			Logs:    logs,
 		}, err
+	}
+
+	if !status.AllReady {
+		msg := fmt.Sprintf("Waiting for vSphere pods: %s", status.NotReadyReason)
+		logger.Info(msg)
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, msg, string(p.Name()))
+
+		return &PhaseResult{
+			Status:       migrationv1alpha1.PhaseStatusRunning,
+			Message:      msg,
+			Progress:     50,
+			Logs:         logs,
+			RequeueAfter: 15 * time.Second,
+		}, nil
 	}
 
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
@@ -84,7 +100,7 @@ func (p *RestartPodsPhase) Execute(ctx context.Context, migration *migrationv1al
 }
 
 // Rollback reverts the phase changes
-func (p *RestartPodsPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration) error {
+func (p *RestartPodsPhase) Rollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 	logger.Info("Rollback for RestartPods phase - no action needed")
 	// Pods will automatically restart if needed after configuration rollback

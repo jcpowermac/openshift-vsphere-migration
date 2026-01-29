@@ -3,11 +3,11 @@ package util
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
 )
 
 // SetCondition sets a condition on the migration status
-func SetCondition(migration *migrationv1alpha1.VSphereMigration, conditionType string, status metav1.ConditionStatus, reason, message string) {
+func SetCondition(migration *migrationv1alpha1.VmwareCloudFoundationMigration, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	now := metav1.Now()
 
 	// Find existing condition
@@ -35,7 +35,7 @@ func SetCondition(migration *migrationv1alpha1.VSphereMigration, conditionType s
 }
 
 // IsConditionTrue checks if a condition is true
-func IsConditionTrue(migration *migrationv1alpha1.VSphereMigration, conditionType string) bool {
+func IsConditionTrue(migration *migrationv1alpha1.VmwareCloudFoundationMigration, conditionType string) bool {
 	for _, condition := range migration.Status.Conditions {
 		if condition.Type == conditionType {
 			return condition.Status == metav1.ConditionTrue
@@ -45,7 +45,7 @@ func IsConditionTrue(migration *migrationv1alpha1.VSphereMigration, conditionTyp
 }
 
 // GetCondition gets a condition by type
-func GetCondition(migration *migrationv1alpha1.VSphereMigration, conditionType string) *metav1.Condition {
+func GetCondition(migration *migrationv1alpha1.VmwareCloudFoundationMigration, conditionType string) *metav1.Condition {
 	for i := range migration.Status.Conditions {
 		if migration.Status.Conditions[i].Type == conditionType {
 			return &migration.Status.Conditions[i]

@@ -7,7 +7,7 @@ import (
 	"github.com/vmware/govmomi/simulator"
 	"k8s.io/klog/v2"
 
-	"github.com/openshift/vsphere-migration-controller/pkg/vsphere"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/vsphere"
 )
 
 func TestNewClient(t *testing.T) {

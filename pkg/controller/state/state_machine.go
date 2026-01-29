@@ -8,8 +8,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
-	migrationv1alpha1 "github.com/openshift/vsphere-migration-controller/pkg/apis/migration/v1alpha1"
-	"github.com/openshift/vsphere-migration-controller/pkg/controller/phases"
+	migrationv1alpha1 "github.com/openshift/vmware-cloud-foundation-migration/pkg/apis/migration/v1alpha1"
+	"github.com/openshift/vmware-cloud-foundation-migration/pkg/controller/phases"
 )
 
 // StateMachine manages migration state transitions
@@ -23,28 +23,29 @@ func NewStateMachine(executor *phases.PhaseExecutor) *StateMachine {
 	return &StateMachine{
 		phaseExecutor: executor,
 		phaseOrder: []migrationv1alpha1.MigrationPhase{
-			migrationv1alpha1.PhasePreflight,
-			migrationv1alpha1.PhaseBackup,
-			migrationv1alpha1.PhaseDisableCVO,
-			migrationv1alpha1.PhaseUpdateSecrets,
-			migrationv1alpha1.PhaseCreateTags,
-			migrationv1alpha1.PhaseCreateFolder,
-			migrationv1alpha1.PhaseDeleteCPMS, // DELETE CPMS BEFORE infrastructure update
-			migrationv1alpha1.PhaseUpdateInfrastructure,
-			migrationv1alpha1.PhaseUpdateConfig,
-			migrationv1alpha1.PhaseRestartPods,
-			migrationv1alpha1.PhaseMonitorHealth,
-			migrationv1alpha1.PhaseCreateWorkers,
-			migrationv1alpha1.PhaseRecreateCPMS, // RECREATE CPMS after infrastructure update
-			migrationv1alpha1.PhaseScaleOldMachines,
-			migrationv1alpha1.PhaseCleanup,
-			migrationv1alpha1.PhaseVerify,
+			migrationv1alpha1.PhasePreflight,            // 1
+			migrationv1alpha1.PhaseBackup,               // 2
+			migrationv1alpha1.PhaseDisableCVO,           // 3
+			migrationv1alpha1.PhaseUpdateSecrets,        // 4
+			migrationv1alpha1.PhaseCreateTags,           // 5
+			migrationv1alpha1.PhaseCreateFolder,         // 6
+			migrationv1alpha1.PhaseDeleteCPMS,           // 7
+			migrationv1alpha1.PhaseUpdateInfrastructure, // 8
+			migrationv1alpha1.PhaseUpdateConfig,         // 9
+			migrationv1alpha1.PhaseRestartPods,          // 10
+			migrationv1alpha1.PhaseMonitorHealth,        // 11
+			migrationv1alpha1.PhaseCreateWorkers,        // 12
+			migrationv1alpha1.PhaseRecreateCPMS,         // 13
+			migrationv1alpha1.PhaseMigrateCSIVolumes,    // 14
+			migrationv1alpha1.PhaseScaleOldMachines,     // 15
+			migrationv1alpha1.PhaseCleanup,              // 16
+			migrationv1alpha1.PhaseVerify,               // 17
 		},
 	}
 }
 
 // GetNextPhase returns the next phase to execute
-func (s *StateMachine) GetNextPhase(migration *migrationv1alpha1.VSphereMigration) (migrationv1alpha1.MigrationPhase, error) {
+func (s *StateMachine) GetNextPhase(migration *migrationv1alpha1.VmwareCloudFoundationMigration) (migrationv1alpha1.MigrationPhase, error) {
 	currentPhase := migration.Status.Phase
 
 	// If no current phase, start with first phase
@@ -73,7 +74,7 @@ func (s *StateMachine) GetNextPhase(migration *migrationv1alpha1.VSphereMigratio
 }
 
 // ShouldExecutePhase determines if a phase should be executed
-func (s *StateMachine) ShouldExecutePhase(migration *migrationv1alpha1.VSphereMigration, phase migrationv1alpha1.MigrationPhase) bool {
+func (s *StateMachine) ShouldExecutePhase(migration *migrationv1alpha1.VmwareCloudFoundationMigration, phase migrationv1alpha1.MigrationPhase) bool {
 	// Check migration state
 	if migration.Spec.State != migrationv1alpha1.MigrationStateRunning {
 		return false
@@ -94,7 +95,7 @@ func (s *StateMachine) ShouldExecutePhase(migration *migrationv1alpha1.VSphereMi
 }
 
 // RecordPhaseCompletion records a completed phase in history
-func (s *StateMachine) RecordPhaseCompletion(migration *migrationv1alpha1.VSphereMigration, phase migrationv1alpha1.MigrationPhase, result *phases.PhaseResult) {
+func (s *StateMachine) RecordPhaseCompletion(migration *migrationv1alpha1.VmwareCloudFoundationMigration, phase migrationv1alpha1.MigrationPhase, result *phases.PhaseResult) {
 	now := metav1.Now()
 
 	// Find start time from current phase state
@@ -142,9 +143,27 @@ func (s *StateMachine) RecordPhaseCompletion(migration *migrationv1alpha1.VSpher
 }
 
 // InitiateRollback initiates a rollback
-func (s *StateMachine) InitiateRollback(ctx context.Context, migration *migrationv1alpha1.VSphereMigration, phaseList []phases.Phase) error {
+func (s *StateMachine) InitiateRollback(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration, phaseList []phases.Phase) error {
 	logger := klog.FromContext(ctx)
-	logger.Info("Initiating rollback")
+
+	// Prominent rollback logging
+	logger.Info("========================================")
+	logger.Info("ROLLBACK INITIATED")
+	logger.Info("========================================")
+
+	// Get failure reason from current phase state if available
+	failureReason := "unknown"
+	if migration.Status.CurrentPhaseState != nil && migration.Status.CurrentPhaseState.Message != "" {
+		failureReason = migration.Status.CurrentPhaseState.Message
+	}
+
+	logger.Info("Migration rollback starting",
+		"migrationName", migration.Name,
+		"currentPhase", migration.Status.Phase,
+		"completedPhases", len(migration.Status.PhaseHistory),
+		"failureReason", failureReason,
+		"failedPhase", migration.Status.Phase)
+	logger.Info("Failure details", "error", failureReason)
 
 	// Update phase to rolling back
 	migration.Status.Phase = migrationv1alpha1.PhaseRollingBack
@@ -208,12 +227,18 @@ func (s *StateMachine) InitiateRollback(ctx context.Context, migration *migratio
 	now := metav1.Now()
 	migration.Status.CompletionTime = &now
 
-	logger.Info("Rollback completed")
+	logger.Info("========================================")
+	logger.Info("ROLLBACK COMPLETED")
+	logger.Info("========================================")
+	logger.Info("Migration rollback finished",
+		"migrationName", migration.Name,
+		"finalPhase", migration.Status.Phase,
+		"phasesRolledBack", len(migration.Status.PhaseHistory))
 	return nil
 }
 
 // MarkPhaseForApproval marks a phase as requiring approval
-func (s *StateMachine) MarkPhaseForApproval(migration *migrationv1alpha1.VSphereMigration, phase migrationv1alpha1.MigrationPhase, message string) {
+func (s *StateMachine) MarkPhaseForApproval(migration *migrationv1alpha1.VmwareCloudFoundationMigration, phase migrationv1alpha1.MigrationPhase, message string) {
 	phaseState := &migrationv1alpha1.PhaseState{
 		Name:             phase,
 		Status:           migrationv1alpha1.PhaseStatusPending,
@@ -226,7 +251,7 @@ func (s *StateMachine) MarkPhaseForApproval(migration *migrationv1alpha1.VSphere
 }
 
 // ApprovePhase approves a phase for execution
-func (s *StateMachine) ApprovePhase(migration *migrationv1alpha1.VSphereMigration, phase migrationv1alpha1.MigrationPhase) error {
+func (s *StateMachine) ApprovePhase(migration *migrationv1alpha1.VmwareCloudFoundationMigration, phase migrationv1alpha1.MigrationPhase) error {
 	if migration.Status.CurrentPhaseState == nil {
 		return fmt.Errorf("no current phase state")
 	}
@@ -244,7 +269,7 @@ func (s *StateMachine) ApprovePhase(migration *migrationv1alpha1.VSphereMigratio
 }
 
 // UpdatePhaseProgress updates the progress of the current phase
-func (s *StateMachine) UpdatePhaseProgress(migration *migrationv1alpha1.VSphereMigration, progress int32, message string) {
+func (s *StateMachine) UpdatePhaseProgress(migration *migrationv1alpha1.VmwareCloudFoundationMigration, progress int32, message string) {
 	if migration.Status.CurrentPhaseState != nil {
 		migration.Status.CurrentPhaseState.Progress = progress
 		migration.Status.CurrentPhaseState.Message = message
@@ -252,7 +277,7 @@ func (s *StateMachine) UpdatePhaseProgress(migration *migrationv1alpha1.VSphereM
 }
 
 // ShouldRequeue determines if the migration should be requeued
-func (s *StateMachine) ShouldRequeue(migration *migrationv1alpha1.VSphereMigration, result *phases.PhaseResult) (bool, time.Duration) {
+func (s *StateMachine) ShouldRequeue(migration *migrationv1alpha1.VmwareCloudFoundationMigration, result *phases.PhaseResult) (bool, time.Duration) {
 	// Requeue if phase wants to be requeued
 	if result != nil && result.RequeueAfter > 0 {
 		return true, result.RequeueAfter
