@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/vmware/govmomi/object"
+	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
 	"github.com/vmware/govmomi/vslm"
 	vslmtypes "github.com/vmware/govmomi/vslm/types"
@@ -290,4 +292,125 @@ func (m *FCDManager) Close(ctx context.Context) error {
 	// The vslm.Client doesn't have its own logout method,
 	// it shares the session with the parent vim25.Client
 	return nil
+}
+
+// extractBackingObjectId extracts the BackingObjectId from various virtual disk backing types
+// This handles multiple VMDK backing formats that vSphere may use for FCDs
+func extractBackingObjectId(backing types.BaseVirtualDeviceBackingInfo) string {
+	switch b := backing.(type) {
+	case *types.VirtualDiskFlatVer2BackingInfo:
+		return b.BackingObjectId
+	case *types.VirtualDiskSparseVer2BackingInfo:
+		return b.BackingObjectId
+	case *types.VirtualDiskSeSparseBackingInfo:
+		return b.BackingObjectId
+	case *types.VirtualDiskRawDiskMappingVer1BackingInfo:
+		return b.BackingObjectId
+	default:
+		return ""
+	}
+}
+
+// IsFCDAttachedToVM checks if an FCD is attached to a specific VM
+// Returns: attached bool, error
+func (m *FCDManager) IsFCDAttachedToVM(ctx context.Context, vm *object.VirtualMachine, fcdID string) (bool, error) {
+	var vmMo mo.VirtualMachine
+	err := vm.Properties(ctx, vm.Reference(), []string{"config.hardware.device"}, &vmMo)
+	if err != nil {
+		return false, fmt.Errorf("failed to get VM properties: %w", err)
+	}
+
+	for _, device := range vmMo.Config.Hardware.Device {
+		if disk, ok := device.(*types.VirtualDisk); ok {
+			// Check if this disk has FCD backing using multiple backing types
+			backingObjectId := extractBackingObjectId(disk.Backing)
+			if backingObjectId == fcdID {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
+// VerifyFCDNotAttachedToVM directly checks VM hardware config to confirm VMDK is detached
+// This is the final safety gate before migration - DO NOT PROCEED if this fails
+// Returns nil if FCD is confirmed detached, error if still attached or verification fails
+func (m *FCDManager) VerifyFCDNotAttachedToVM(ctx context.Context, vm *object.VirtualMachine, fcdID string) error {
+	logger := klog.FromContext(ctx)
+	logger.V(2).Info("Verifying FCD is not attached to VM (final safety check)",
+		"fcdID", fcdID, "vm", vm.Name())
+
+	attached, err := m.IsFCDAttachedToVM(ctx, vm, fcdID)
+	if err != nil {
+		return fmt.Errorf("failed to verify FCD detachment from VM %s: %w", vm.Name(), err)
+	}
+	if attached {
+		return fmt.Errorf("CRITICAL: FCD %s is still attached to VM %s - refusing to proceed to protect data", fcdID, vm.Name())
+	}
+
+	logger.V(2).Info("Verified FCD is not attached to VM", "fcdID", fcdID, "vm", vm.Name())
+	return nil
+}
+
+// IsFCDAttached checks if an FCD is attached to any VM in the specified folder
+// Returns: attached bool, vmName string (if attached), error
+func (m *FCDManager) IsFCDAttached(ctx context.Context, datacenter string, folderPath string, fcdID string) (bool, string, error) {
+	logger := klog.FromContext(ctx)
+
+	// List VMs in the folder
+	vms, err := m.client.ListVirtualMachinesInFolder(ctx, datacenter, folderPath)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to list VMs in folder: %w", err)
+	}
+
+	logger.V(2).Info("Checking FCD attachment", "fcdID", fcdID, "vmCount", len(vms))
+
+	for _, vm := range vms {
+		attached, err := m.IsFCDAttachedToVM(ctx, vm, fcdID)
+		if err != nil {
+			// Log transient errors but continue checking other VMs
+			logger.V(2).Info("Failed to check FCD attachment on VM, continuing", "vm", vm.Name(), "error", err)
+			continue
+		}
+		if attached {
+			return true, vm.Name(), nil
+		}
+	}
+
+	return false, "", nil
+}
+
+// WaitForFCDDetached polls until the FCD is no longer attached to any VM
+// Returns error if timeout is exceeded
+func (m *FCDManager) WaitForFCDDetached(ctx context.Context, datacenter string, folderPath string, fcdID string, timeout time.Duration) error {
+	logger := klog.FromContext(ctx)
+
+	const pollInterval = 5 * time.Second
+	deadline := time.Now().Add(timeout)
+
+	for {
+		attached, vmName, err := m.IsFCDAttached(ctx, datacenter, folderPath, fcdID)
+		if err != nil {
+			// Return immediately on finder/configuration errors
+			return fmt.Errorf("failed to check FCD attachment: %w", err)
+		}
+
+		if !attached {
+			logger.V(2).Info("FCD is not attached to any VM", "fcdID", fcdID)
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for FCD %s to be detached from VM %s", fcdID, vmName)
+		}
+
+		logger.V(2).Info("FCD still attached, waiting", "fcdID", fcdID, "vm", vmName)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+			// Continue polling
+		}
+	}
 }

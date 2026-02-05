@@ -81,6 +81,17 @@ func (c *MigrationController) syncMigration(ctx context.Context, migration *migr
 		return nil
 	}
 
+	// Check for interrupted phase execution (e.g., controller crash/restart)
+	if migration.Status.CurrentPhaseState != nil {
+		existingState := migration.Status.CurrentPhaseState
+		if existingState.Name == currentPhase && existingState.Status == migrationv1alpha1.PhaseStatusRunning {
+			logger.Info("Detected interrupted phase execution, resuming",
+				"phase", currentPhase,
+				"startTime", existingState.StartTime,
+				"lastHeartbeat", existingState.LastHeartbeat)
+		}
+	}
+
 	// Execute phase
 	logger.Info("Executing phase", "phase", currentPhase)
 	util.SetCondition(migration, migrationv1alpha1.ConditionProgressing, metav1.ConditionTrue,
@@ -113,6 +124,43 @@ func (c *MigrationController) syncMigration(ctx context.Context, migration *migr
 		return err
 	}
 
+	// Check if phase is still running (e.g., waiting for pods, operators)
+	if result.Status == migrationv1alpha1.PhaseStatusRunning {
+		logger.Info("Phase still running, will requeue",
+			"phase", currentPhase,
+			"message", result.Message,
+			"requeueAfter", result.RequeueAfter)
+
+		// Update current phase state to reflect running status
+		now := metav1.Now()
+
+		// Preserve existing StartTime if phase was already running
+		var startTime *metav1.Time
+		if migration.Status.CurrentPhaseState != nil &&
+			migration.Status.CurrentPhaseState.Name == currentPhase &&
+			migration.Status.CurrentPhaseState.StartTime != nil {
+			startTime = migration.Status.CurrentPhaseState.StartTime
+		} else {
+			startTime = &now
+		}
+
+		migration.Status.CurrentPhaseState = &migrationv1alpha1.PhaseState{
+			Name:          currentPhase,
+			Status:        migrationv1alpha1.PhaseStatusRunning,
+			Progress:      result.Progress,
+			Message:       result.Message,
+			StartTime:     startTime,
+			LastHeartbeat: &now,
+		}
+
+		util.SetCondition(migration, migrationv1alpha1.ConditionProgressing, metav1.ConditionTrue,
+			migrationv1alpha1.ReasonProgressing, result.Message)
+
+		// Don't advance to next phase - status update will trigger requeue
+		return nil
+	}
+
+	// Only record completion and advance if status is Completed
 	// Record phase completion
 	c.stateMachine.RecordPhaseCompletion(migration, currentPhase, result)
 

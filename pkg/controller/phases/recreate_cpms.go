@@ -37,58 +37,71 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
-	logger.Info("Updating Control Plane Machine Set for new vCenter")
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Updating Control Plane Machine Set", string(p.Name()))
+	// Check if this is a resume (CPMS already updated, just polling for rollout)
+	isResume := migration.Status.CurrentPhaseState != nil &&
+		migration.Status.CurrentPhaseState.Name == p.Name() &&
+		migration.Status.CurrentPhaseState.Status == migrationv1alpha1.PhaseStatusRunning
 
 	machineManager := p.executor.GetMachineManager()
 
-	// CPMS was already deleted in Phase 6 (DeleteCPMS) and should be auto-recreated as Inactive
-	// Wait for CPMS to become Inactive (auto-recreated)
-	logger.Info("Waiting for CPMS to become Inactive")
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Waiting for CPMS to become Inactive",
-		string(p.Name()))
+	if !isResume {
+		// First execution - update CPMS
+		logger.Info("Updating Control Plane Machine Set for new vCenter")
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Updating Control Plane Machine Set", string(p.Name()))
 
-	if err := machineManager.WaitForCPMSInactive(ctx, 5*time.Minute); err != nil {
-		return &PhaseResult{
-			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: "CPMS did not become Inactive: " + err.Error(),
-			Logs:    logs,
-		}, err
+		// CPMS was already deleted in Phase 6 (DeleteCPMS) and should be auto-recreated as Inactive
+		// Wait for CPMS to become Inactive (auto-recreated)
+		logger.Info("Waiting for CPMS to become Inactive")
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+			"Waiting for CPMS to become Inactive",
+			string(p.Name()))
+
+		if err := machineManager.WaitForCPMSInactive(ctx, 5*time.Minute); err != nil {
+			return &PhaseResult{
+				Status:  migrationv1alpha1.PhaseStatusFailed,
+				Message: "CPMS did not become Inactive: " + err.Error(),
+				Logs:    logs,
+			}, err
+		}
+
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+			"CPMS is now Inactive",
+			string(p.Name()))
+
+		// Get infrastructure ID for folder path construction
+		infraID, err := p.executor.infraManager.GetInfrastructureID(ctx)
+		if err != nil {
+			return &PhaseResult{
+				Status:  migrationv1alpha1.PhaseStatusFailed,
+				Message: "Failed to get infrastructure ID: " + err.Error(),
+				Logs:    logs,
+			}, err
+		}
+
+		// Update CPMS with new failure domain and set to Active
+		logger.Info("Updating CPMS with new failure domain",
+			"failureDomain", migration.Spec.ControlPlaneMachineSetConfig.FailureDomain)
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+			"Updating CPMS with target vCenter failure domain",
+			string(p.Name()))
+
+		if err := machineManager.UpdateCPMSFailureDomain(ctx, migration, infraID); err != nil {
+			return &PhaseResult{
+				Status:  migrationv1alpha1.PhaseStatusFailed,
+				Message: "Failed to update CPMS: " + err.Error(),
+				Logs:    logs,
+			}, err
+		}
+
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+			"Updated CPMS and set to Active",
+			string(p.Name()))
+	} else {
+		logger.Info("Resuming control plane rollout check")
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+			"Resuming control plane rollout check",
+			string(p.Name()))
 	}
-
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"CPMS is now Inactive",
-		string(p.Name()))
-
-	// Get infrastructure ID for folder path construction
-	infraID, err := p.executor.infraManager.GetInfrastructureID(ctx)
-	if err != nil {
-		return &PhaseResult{
-			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: "Failed to get infrastructure ID: " + err.Error(),
-			Logs:    logs,
-		}, err
-	}
-
-	// Update CPMS with new failure domain and set to Active
-	logger.Info("Updating CPMS with new failure domain",
-		"failureDomain", migration.Spec.ControlPlaneMachineSetConfig.FailureDomain)
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Updating CPMS with target vCenter failure domain",
-		string(p.Name()))
-
-	if err := machineManager.UpdateCPMSFailureDomain(ctx, migration, infraID); err != nil {
-		return &PhaseResult{
-			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: "Failed to update CPMS: " + err.Error(),
-			Logs:    logs,
-		}, err
-	}
-
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Updated CPMS and set to Active",
-		string(p.Name()))
 
 	// Check rollout status (non-blocking to avoid leader election timeout)
 	logger.Info("Checking control plane rollout status")

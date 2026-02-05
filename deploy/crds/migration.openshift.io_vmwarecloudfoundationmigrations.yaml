@@ -416,12 +416,115 @@ spec:
                   - type
                   type: object
                 type: array
+              csiVolumeMigration:
+                description: CSIVolumeMigration tracks CSI volume migration progress
+                properties:
+                  failedVolumes:
+                    description: FailedVolumes is the number of volumes that failed
+                      migration
+                    format: int32
+                    type: integer
+                  migratedVolumes:
+                    description: MigratedVolumes is the number of successfully migrated
+                      volumes
+                    format: int32
+                    type: integer
+                  totalVolumes:
+                    description: TotalVolumes is the total number of CSI volumes to
+                      migrate
+                    format: int32
+                    type: integer
+                  volumes:
+                    description: Volumes tracks individual volume migration states
+                    items:
+                      description: PVMigrationState tracks individual PV migration
+                      properties:
+                        dummyVMName:
+                          description: DummyVMName is the name of the dummy VM used
+                            for vMotion
+                          type: string
+                        message:
+                          description: Message is a human-readable status message
+                          type: string
+                        pvName:
+                          description: PVName is the PersistentVolume name
+                          type: string
+                        pvcName:
+                          description: PVCName is the PersistentVolumeClaim name
+                          type: string
+                        pvcNamespace:
+                          description: PVCNamespace is the PersistentVolumeClaim namespace
+                          type: string
+                        scaledDownResources:
+                          description: ScaledDownResources tracks resources that were
+                            scaled down for this PV
+                          items:
+                            description: ScaledResource tracks a resource that was
+                              scaled down during migration
+                            properties:
+                              kind:
+                                description: Kind is the resource kind (Deployment,
+                                  StatefulSet, ReplicaSet, etc.)
+                                type: string
+                              name:
+                                description: Name is the resource name
+                                type: string
+                              namespace:
+                                description: Namespace is the resource namespace
+                                type: string
+                              originalReplicas:
+                                description: OriginalReplicas is the replica count
+                                  before scaling down
+                                format: int32
+                                type: integer
+                            required:
+                            - kind
+                            - name
+                            - namespace
+                            - originalReplicas
+                            type: object
+                          type: array
+                        sourceVolumeID:
+                          description: SourceVolumeID is the FCD ID on source vCenter
+                          type: string
+                        sourceVolumePath:
+                          description: SourceVolumePath is the VMDK path on source
+                            vCenter
+                          type: string
+                        status:
+                          description: 'Status is the migration status: Pending, Quiesced,
+                            Relocating, Relocated, Registered, Complete, Failed'
+                          type: string
+                        targetVolumeID:
+                          description: TargetVolumeID is the FCD ID on target vCenter
+                          type: string
+                        targetVolumePath:
+                          description: TargetVolumePath is the VMDK path on target
+                            vCenter
+                          type: string
+                      required:
+                      - pvName
+                      - sourceVolumePath
+                      - status
+                      type: object
+                    type: array
+                required:
+                - failedVolumes
+                - migratedVolumes
+                - totalVolumes
+                type: object
               currentPhaseState:
                 description: CurrentPhaseState tracks the current phase execution
                 properties:
                   approved:
                     description: Approved indicates if the phase has been approved
                     type: boolean
+                  lastHeartbeat:
+                    description: |-
+                      LastHeartbeat tracks the last time the phase was actively being processed.
+                      Used to detect stale phase execution that may need recovery.
+                    format: date-time
+                    type: string
                   message:
                     description: Message is a human-readable status message
                     type: string
@@ -436,6 +539,12 @@ spec:
                     description: RequiresApproval indicates if manual approval is
                       needed
                     type: boolean
+                  startTime:
+                    description: |-
+                      StartTime tracks when the phase started execution.
+                      Used to detect interrupted phase execution on controller restart.
+                    format: date-time
+                    type: string
                   status:
                     description: Status is the current status
                     type: string

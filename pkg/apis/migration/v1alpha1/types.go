@@ -197,7 +197,7 @@ type PVMigrationState struct {
 	// DummyVMName is the name of the dummy VM used for vMotion
 	DummyVMName string `json:"dummyVMName,omitempty"`
 
-	// Status is the migration status: Pending, Quiesced, Relocating, Relocated, Registered, Complete, Failed
+	// Status is the migration status: Pending, RetainSet, Quiesced, PVCDeleted, Relocating, Relocated, Registered, PVUpdated, Complete, Failed
 	Status string `json:"status"`
 
 	// Message is a human-readable status message
@@ -205,6 +205,15 @@ type PVMigrationState struct {
 
 	// ScaledDownResources tracks resources that were scaled down for this PV
 	ScaledDownResources []ScaledResource `json:"scaledDownResources,omitempty"`
+
+	// OriginalReclaimPolicy stores the original policy before setting to Retain
+	OriginalReclaimPolicy string `json:"originalReclaimPolicy,omitempty"`
+
+	// PVCSpec stores base64-encoded PVC spec for recreation (non-StatefulSet only)
+	PVCSpec string `json:"pvcSpec,omitempty"`
+
+	// WorkloadType indicates primary workload type (StatefulSet, Deployment, etc.)
+	WorkloadType string `json:"workloadType,omitempty"`
 }
 
 // ScaledResource tracks a resource that was scaled down during migration
@@ -293,6 +302,14 @@ type PhaseState struct {
 
 	// Approved indicates if the phase has been approved
 	Approved bool `json:"approved,omitempty"`
+
+	// StartTime tracks when the phase started execution.
+	// Used to detect interrupted phase execution on controller restart.
+	StartTime *metav1.Time `json:"startTime,omitempty"`
+
+	// LastHeartbeat tracks the last time the phase was actively being processed.
+	// Used to detect stale phase execution that may need recovery.
+	LastHeartbeat *metav1.Time `json:"lastHeartbeat,omitempty"`
 }
 
 // PhaseStatus represents the status of a phase

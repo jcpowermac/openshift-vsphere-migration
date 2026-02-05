@@ -38,6 +38,19 @@ import (
 const (
 	leaseLockName      = "vmware-cloud-foundation-migration"
 	leaseLockNamespace = "vmware-cloud-foundation-migration"
+
+	// Leader election timeouts are configured to handle extended API unavailability
+	// during control plane rollouts (e.g., CPMS-triggered machine replacements).
+	// During these rollouts, the API can be unavailable for 1-5 minutes.
+	// Standard timeouts (15s lease, 10s renew) would cause the controller to exit
+	// on any API call taking >10 seconds.
+	leaderElectionLeaseDuration = 5 * time.Minute
+	leaderElectionRenewDeadline = 4 * time.Minute
+	leaderElectionRetryPeriod   = 30 * time.Second
+
+	// Grace period before exit on leadership loss allows in-flight operations
+	// to complete and provides time for the API to recover during transient outages.
+	leadershipLossGracePeriod = 10 * time.Second
 )
 
 var (
@@ -234,16 +247,19 @@ func main() {
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:            lock,
 		ReleaseOnCancel: true,
-		LeaseDuration:   15 * time.Second,
-		RenewDeadline:   10 * time.Second,
-		RetryPeriod:     2 * time.Second,
+		LeaseDuration:   leaderElectionLeaseDuration,
+		RenewDeadline:   leaderElectionRenewDeadline,
+		RetryPeriod:     leaderElectionRetryPeriod,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				logger.Info("Acquired leadership")
 				run(ctx)
 			},
 			OnStoppedLeading: func() {
-				logger.Info("Lost leadership, shutting down")
+				logger.Info("Lost leadership, attempting graceful shutdown")
+				logger.Info("Waiting for grace period before exit", "duration", leadershipLossGracePeriod)
+				time.Sleep(leadershipLossGracePeriod)
+				logger.Info("Grace period complete, shutting down")
 				os.Exit(0)
 			},
 			OnNewLeader: func(identity string) {

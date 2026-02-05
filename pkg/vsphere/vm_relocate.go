@@ -21,18 +21,19 @@ type VMRelocator struct {
 // RelocateConfig holds configuration for VM relocation
 type RelocateConfig struct {
 	// Target vCenter connection info
-	TargetVCenterURL      string
-	TargetVCenterUser     string
-	TargetVCenterPassword string
-	TargetVCenterThumbprint string
+	TargetVCenterURL          string
+	TargetVCenterUser         string
+	TargetVCenterPassword     string
+	TargetVCenterThumbprint   string
+	TargetVCenterInstanceUUID string
 
 	// Target location
-	TargetDatacenter  string
-	TargetCluster     string
-	TargetDatastore   string
-	TargetFolder      string
+	TargetDatacenter   string
+	TargetCluster      string
+	TargetDatastore    string
+	TargetFolder       string
 	TargetResourcePool string
-	TargetNetwork     string
+	TargetNetwork      string
 }
 
 // DummyVMConfig holds configuration for creating a dummy VM
@@ -226,11 +227,19 @@ func (r *VMRelocator) RelocateVM(ctx context.Context, vm *object.VirtualMachine,
 	dsRef := targetDatastore.Reference()
 
 	relocateSpec := types.VirtualMachineRelocateSpec{
-		Service:  serviceLocator,
-		Folder:   &folderRef,
-		Pool:     &poolRef,
+		Service:   serviceLocator,
+		Folder:    &folderRef,
+		Pool:      &poolRef,
 		Datastore: &dsRef,
 	}
+
+	// Log relocate spec details for debugging
+	logger.Info("Relocate spec details",
+		"serviceLocatorURL", serviceLocator.Url,
+		"serviceLocatorInstanceUUID", serviceLocator.InstanceUuid,
+		"targetFolder", folderRef.Value,
+		"targetPool", poolRef.Value,
+		"targetDatastore", dsRef.Value)
 
 	// Relocate the VM
 	logger.Info("Starting VM relocation task")
@@ -250,8 +259,22 @@ func (r *VMRelocator) RelocateVM(ctx context.Context, vm *object.VirtualMachine,
 
 // buildServiceLocator creates a ServiceLocator for cross-vCenter operations
 func (r *VMRelocator) buildServiceLocator(config RelocateConfig) (*types.ServiceLocator, error) {
+	logger := klog.Background()
+	logger.Info("Building ServiceLocator for cross-vCenter vMotion",
+		"targetURL", config.TargetVCenterURL,
+		"targetUser", config.TargetVCenterUser,
+		"instanceUUID", config.TargetVCenterInstanceUUID,
+		"thumbprintSet", config.TargetVCenterThumbprint != "")
+
+	if config.TargetVCenterInstanceUUID == "" {
+		return nil, fmt.Errorf("target vCenter instance UUID is required but was empty")
+	}
+	if config.TargetVCenterThumbprint == "" {
+		return nil, fmt.Errorf("target vCenter SSL thumbprint is required but was empty")
+	}
+
 	return &types.ServiceLocator{
-		InstanceUuid:  "", // Will be filled by vCenter
+		InstanceUuid:  config.TargetVCenterInstanceUUID,
 		Url:           config.TargetVCenterURL,
 		Credential: &types.ServiceLocatorNamePassword{
 			Username: config.TargetVCenterUser,

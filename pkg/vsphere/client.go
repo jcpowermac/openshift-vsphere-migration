@@ -214,6 +214,33 @@ func (c *Client) GetVirtualMachine(ctx context.Context, path string) (*object.Vi
 	return vm, nil
 }
 
+// ListVirtualMachinesInFolder returns all VMs in a folder path
+func (c *Client) ListVirtualMachinesInFolder(ctx context.Context, datacenter string, folderPath string) ([]*object.VirtualMachine, error) {
+	logger := klog.FromContext(ctx)
+
+	// Set datacenter context
+	dc, err := c.GetDatacenter(ctx, datacenter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get datacenter %s: %w", datacenter, err)
+	}
+	c.finder.SetDatacenter(dc)
+
+	// List VMs in folder using glob pattern
+	vmPath := fmt.Sprintf("%s/*", folderPath)
+	vms, err := c.finder.VirtualMachineList(ctx, vmPath)
+	if err != nil {
+		// Check if it's a "not found" error which is acceptable (empty folder)
+		if strings.Contains(err.Error(), "not found") {
+			logger.V(2).Info("No VMs found in folder", "folder", folderPath)
+			return []*object.VirtualMachine{}, nil
+		}
+		return nil, fmt.Errorf("failed to list VMs in folder %s: %w", folderPath, err)
+	}
+
+	logger.V(2).Info("Found VMs in folder", "folder", folderPath, "count", len(vms))
+	return vms, nil
+}
+
 // TagManager returns the tag manager
 func (c *Client) TagManager() *tags.Manager {
 	return c.tagManager
@@ -227,6 +254,11 @@ func (c *Client) Finder() *find.Finder {
 // VimClient returns the vim25 client
 func (c *Client) VimClient() *vim25.Client {
 	return c.vimClient
+}
+
+// GetInstanceUUID returns the vCenter server's instance UUID
+func (c *Client) GetInstanceUUID() string {
+	return c.vimClient.ServiceContent.About.InstanceUuid
 }
 
 // GetSOAPLogs returns SOAP log entries

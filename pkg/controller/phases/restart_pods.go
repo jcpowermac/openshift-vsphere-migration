@@ -40,21 +40,34 @@ func (p *RestartPodsPhase) Execute(ctx context.Context, migration *migrationv1al
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
-	logger.Info("Restarting vSphere-related pods")
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Restarting vSphere-related pods", string(p.Name()))
+	// Check if this is a resume (pods already restarted, just polling for readiness)
+	isResume := migration.Status.CurrentPhaseState != nil &&
+		migration.Status.CurrentPhaseState.Name == p.Name() &&
+		migration.Status.CurrentPhaseState.Status == migrationv1alpha1.PhaseStatusRunning
 
-	// Restart vSphere pods
-	if err := p.podManager.RestartVSpherePods(ctx); err != nil {
-		return &PhaseResult{
-			Status:  migrationv1alpha1.PhaseStatusFailed,
-			Message: "Failed to restart vSphere pods: " + err.Error(),
-			Logs:    logs,
-		}, err
+	if !isResume {
+		// First execution - restart pods
+		logger.Info("Restarting vSphere-related pods")
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Restarting vSphere-related pods", string(p.Name()))
+
+		// Restart vSphere pods
+		if err := p.podManager.RestartVSpherePods(ctx); err != nil {
+			return &PhaseResult{
+				Status:  migrationv1alpha1.PhaseStatusFailed,
+				Message: "Failed to restart vSphere pods: " + err.Error(),
+				Logs:    logs,
+			}, err
+		}
+
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+			"Triggered restart of vSphere pods",
+			string(p.Name()))
+	} else {
+		logger.Info("Resuming pod readiness check")
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
+			"Resuming pod readiness check",
+			string(p.Name()))
 	}
-
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Triggered restart of vSphere pods",
-		string(p.Name()))
 
 	// Check if pods are ready (non-blocking to avoid leader election timeout)
 	logger.Info("Checking vSphere pods readiness")

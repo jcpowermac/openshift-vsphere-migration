@@ -469,8 +469,12 @@ func (m *MachineManager) getMachineStatus(ctx context.Context, machineSetName st
 
 // getNodeStatus returns ready and total node counts for a MachineSet
 func (m *MachineManager) getNodeStatus(ctx context.Context, machineSetName string) (int32, int32, error) {
-	// List nodes
-	nodes, err := m.kubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{
+	if m.machineClient == nil {
+		return 0, 0, fmt.Errorf("machine client not initialized")
+	}
+
+	// List machines for this MachineSet
+	machines, err := m.machineClient.MachineV1beta1().Machines(MachineAPINamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labels.SelectorFromSet(labels.Set{
 			"machine.openshift.io/cluster-api-machineset": machineSetName,
 		}).String(),
@@ -479,10 +483,22 @@ func (m *MachineManager) getNodeStatus(ctx context.Context, machineSetName strin
 		return 0, 0, err
 	}
 
-	total := int32(len(nodes.Items))
+	total := int32(0)
 	ready := int32(0)
 
-	for _, node := range nodes.Items {
+	for _, machine := range machines.Items {
+		// Only count machines that have a node reference
+		if machine.Status.NodeRef == nil {
+			continue
+		}
+		total++
+
+		// Get the node and check if it's ready
+		node, err := m.kubeClient.CoreV1().Nodes().Get(ctx, machine.Status.NodeRef.Name, metav1.GetOptions{})
+		if err != nil {
+			continue // Node not found yet
+		}
+
 		for _, condition := range node.Status.Conditions {
 			if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
 				ready++

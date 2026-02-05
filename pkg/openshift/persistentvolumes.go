@@ -2,11 +2,16 @@ package openshift
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
@@ -245,4 +250,214 @@ func (m *PersistentVolumeManager) WaitForPVAvailable(ctx context.Context, pvName
 			logger.V(2).Info("PV not yet available", "pv", pvName, "phase", pv.Status.Phase)
 		}
 	}
+}
+
+// UpdatePVReclaimPolicy updates the reclaim policy of a PV and returns the original policy
+func (m *PersistentVolumeManager) UpdatePVReclaimPolicy(ctx context.Context, pvName string, newPolicy corev1.PersistentVolumeReclaimPolicy) (corev1.PersistentVolumeReclaimPolicy, error) {
+	logger := klog.FromContext(ctx)
+	logger.Info("Updating PV reclaim policy", "pv", pvName, "newPolicy", newPolicy)
+
+	pv, err := m.kubeClient.CoreV1().PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get PV %s: %w", pvName, err)
+	}
+
+	originalPolicy := pv.Spec.PersistentVolumeReclaimPolicy
+
+	// Skip if already set to the desired policy
+	if originalPolicy == newPolicy {
+		logger.Info("PV already has desired reclaim policy", "pv", pvName, "policy", newPolicy)
+		return originalPolicy, nil
+	}
+
+	// Update the reclaim policy
+	pv.Spec.PersistentVolumeReclaimPolicy = newPolicy
+
+	_, err = m.kubeClient.CoreV1().PersistentVolumes().Update(ctx, pv, metav1.UpdateOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to update PV %s reclaim policy: %w", pvName, err)
+	}
+
+	logger.Info("Successfully updated PV reclaim policy",
+		"pv", pvName,
+		"originalPolicy", originalPolicy,
+		"newPolicy", newPolicy)
+	return originalPolicy, nil
+}
+
+// DeletePVC deletes a PersistentVolumeClaim
+func (m *PersistentVolumeManager) DeletePVC(ctx context.Context, namespace, name string) error {
+	logger := klog.FromContext(ctx)
+	logger.Info("Deleting PVC", "namespace", namespace, "name", name)
+
+	err := m.kubeClient.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("PVC already deleted", "namespace", namespace, "name", name)
+			return nil
+		}
+		return fmt.Errorf("failed to delete PVC %s/%s: %w", namespace, name, err)
+	}
+
+	logger.Info("Successfully deleted PVC", "namespace", namespace, "name", name)
+	return nil
+}
+
+// WaitForPVCDeleted waits for a PVC to be fully deleted
+func (m *PersistentVolumeManager) WaitForPVCDeleted(ctx context.Context, namespace, name string, timeout time.Duration) error {
+	logger := klog.FromContext(ctx)
+	logger.Info("Waiting for PVC to be deleted", "namespace", namespace, "name", name, "timeout", timeout)
+
+	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		_, err := m.kubeClient.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				logger.Info("PVC deleted", "namespace", namespace, "name", name)
+				return true, nil
+			}
+			return false, err
+		}
+		logger.V(2).Info("PVC still exists, waiting...", "namespace", namespace, "name", name)
+		return false, nil
+	})
+}
+
+// ClearPVClaimRef clears the claimRef on a PV to make it Available for rebinding
+func (m *PersistentVolumeManager) ClearPVClaimRef(ctx context.Context, pvName string) error {
+	logger := klog.FromContext(ctx)
+	logger.Info("Clearing PV claimRef", "pv", pvName)
+
+	pv, err := m.kubeClient.CoreV1().PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get PV %s: %w", pvName, err)
+	}
+
+	if pv.Spec.ClaimRef == nil {
+		logger.Info("PV claimRef already cleared", "pv", pvName)
+		return nil
+	}
+
+	// Clear the claimRef
+	pv.Spec.ClaimRef = nil
+
+	_, err = m.kubeClient.CoreV1().PersistentVolumes().Update(ctx, pv, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to clear claimRef on PV %s: %w", pvName, err)
+	}
+
+	logger.Info("Successfully cleared PV claimRef", "pv", pvName)
+	return nil
+}
+
+// PVCBackup represents a backup of a PVC for restoration
+type PVCBackup struct {
+	Name             string                           `json:"name"`
+	Namespace        string                           `json:"namespace"`
+	StorageClassName string                           `json:"storageClassName,omitempty"`
+	AccessModes      []corev1.PersistentVolumeAccessMode `json:"accessModes"`
+	Resources        corev1.VolumeResourceRequirements   `json:"resources"`
+	Labels           map[string]string                `json:"labels,omitempty"`
+	Annotations      map[string]string                `json:"annotations,omitempty"`
+}
+
+// BackupPVCSpec captures a PVC spec as base64-encoded JSON for later restoration
+func (m *PersistentVolumeManager) BackupPVCSpec(ctx context.Context, namespace, name string) (string, error) {
+	logger := klog.FromContext(ctx)
+	logger.Info("Backing up PVC spec", "namespace", namespace, "name", name)
+
+	pvc, err := m.kubeClient.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get PVC %s/%s: %w", namespace, name, err)
+	}
+
+	backup := PVCBackup{
+		Name:             pvc.Name,
+		Namespace:        pvc.Namespace,
+		AccessModes:      pvc.Spec.AccessModes,
+		Resources:        pvc.Spec.Resources,
+		Labels:           pvc.Labels,
+		Annotations:      pvc.Annotations,
+	}
+
+	if pvc.Spec.StorageClassName != nil {
+		backup.StorageClassName = *pvc.Spec.StorageClassName
+	}
+
+	jsonData, err := json.Marshal(backup)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal PVC backup: %w", err)
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	logger.Info("Successfully backed up PVC spec", "namespace", namespace, "name", name)
+	return encoded, nil
+}
+
+// RestorePVC recreates a PVC from a backup with explicit binding to a specific PV
+func (m *PersistentVolumeManager) RestorePVC(ctx context.Context, pvcSpecBase64 string, targetPVName string) error {
+	logger := klog.FromContext(ctx)
+	logger.Info("Restoring PVC", "targetPV", targetPVName)
+
+	// Decode the backup
+	jsonData, err := base64.StdEncoding.DecodeString(pvcSpecBase64)
+	if err != nil {
+		return fmt.Errorf("failed to decode PVC backup: %w", err)
+	}
+
+	var backup PVCBackup
+	if err := json.Unmarshal(jsonData, &backup); err != nil {
+		return fmt.Errorf("failed to unmarshal PVC backup: %w", err)
+	}
+
+	// Create new PVC with explicit binding to the target PV
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        backup.Name,
+			Namespace:   backup.Namespace,
+			Labels:      backup.Labels,
+			Annotations: backup.Annotations,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: backup.AccessModes,
+			Resources:   backup.Resources,
+			VolumeName:  targetPVName, // Explicit binding to the PV
+		},
+	}
+
+	if backup.StorageClassName != "" {
+		pvc.Spec.StorageClassName = &backup.StorageClassName
+	}
+
+	_, err = m.kubeClient.CoreV1().PersistentVolumeClaims(backup.Namespace).Create(ctx, pvc, metav1.CreateOptions{})
+	if err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("PVC already exists", "namespace", backup.Namespace, "name", backup.Name)
+			return nil
+		}
+		return fmt.Errorf("failed to create PVC %s/%s: %w", backup.Namespace, backup.Name, err)
+	}
+
+	logger.Info("Successfully restored PVC", "namespace", backup.Namespace, "name", backup.Name, "boundTo", targetPVName)
+	return nil
+}
+
+// WaitForPVCBound waits for a PVC to become Bound
+func (m *PersistentVolumeManager) WaitForPVCBound(ctx context.Context, namespace, name string, timeout time.Duration) error {
+	logger := klog.FromContext(ctx)
+	logger.Info("Waiting for PVC to become bound", "namespace", namespace, "name", name, "timeout", timeout)
+
+	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		pvc, err := m.kubeClient.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+
+		if pvc.Status.Phase == corev1.ClaimBound {
+			logger.Info("PVC is bound", "namespace", namespace, "name", name, "boundTo", pvc.Spec.VolumeName)
+			return true, nil
+		}
+
+		logger.V(2).Info("PVC not yet bound", "namespace", namespace, "name", name, "phase", pvc.Status.Phase)
+		return false, nil
+	})
 }

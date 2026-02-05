@@ -2,17 +2,21 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -196,24 +200,51 @@ func migrationFromQueueKey(key string) (namespace, name string, err error) {
 	return namespace, name, nil
 }
 
-// updateMigrationStatus updates the status of a migration resource
+// updateMigrationStatus updates the status of a migration resource with retry logic
+// to handle transient API failures during control plane rollouts.
 func (c *MigrationController) updateMigrationStatus(ctx context.Context, migration *migrationv1alpha1.VmwareCloudFoundationMigration) error {
 	logger := klog.FromContext(ctx)
 
-	// Convert typed object to unstructured
-	unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(migration)
-	if err != nil {
-		return fmt.Errorf("failed to convert to unstructured: %w", err)
+	// Configure exponential backoff for status updates.
+	// This helps survive API unavailability during CPMS rollouts.
+	backoff := wait.Backoff{
+		Duration: 1 * time.Second,
+		Factor:   2.0,
+		Jitter:   0.1,
+		Steps:    5,
+		Cap:      30 * time.Second,
 	}
 
-	unstructuredMigration := &unstructured.Unstructured{Object: unstructuredObj}
+	return retry.OnError(backoff, isRetryableAPIError, func() error {
+		// Convert typed object to unstructured
+		unstructuredObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(migration)
+		if err != nil {
+			return fmt.Errorf("failed to convert to unstructured: %w", err)
+		}
 
-	// Update the status subresource
-	_, err = c.dynamicClient.Resource(c.gvr).Namespace(migration.Namespace).UpdateStatus(ctx, unstructuredMigration, metav1.UpdateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to update migration status: %w", err)
+		unstructuredMigration := &unstructured.Unstructured{Object: unstructuredObj}
+
+		// Update the status subresource
+		_, err = c.dynamicClient.Resource(c.gvr).Namespace(migration.Namespace).UpdateStatus(ctx, unstructuredMigration, metav1.UpdateOptions{})
+		if err != nil {
+			logger.V(4).Info("Status update attempt failed, may retry", "error", err)
+			return fmt.Errorf("failed to update migration status: %w", err)
+		}
+
+		logger.Info("Updated migration status", "namespace", migration.Namespace, "name", migration.Name, "phase", migration.Status.Phase)
+		return nil
+	})
+}
+
+// isRetryableAPIError determines if an API error should be retried.
+// Returns true for transient errors that may resolve on retry.
+func isRetryableAPIError(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	logger.Info("Updated migration status", "namespace", migration.Namespace, "name", migration.Name, "phase", migration.Status.Phase)
-	return nil
+	return apierrors.IsTimeout(err) ||
+		apierrors.IsServerTimeout(err) ||
+		apierrors.IsTooManyRequests(err) ||
+		apierrors.IsServiceUnavailable(err) ||
+		errors.Is(err, context.DeadlineExceeded)
 }

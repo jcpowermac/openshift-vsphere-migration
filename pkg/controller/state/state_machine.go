@@ -23,23 +23,23 @@ func NewStateMachine(executor *phases.PhaseExecutor) *StateMachine {
 	return &StateMachine{
 		phaseExecutor: executor,
 		phaseOrder: []migrationv1alpha1.MigrationPhase{
-			migrationv1alpha1.PhasePreflight,            // 1
-			migrationv1alpha1.PhaseBackup,               // 2
-			migrationv1alpha1.PhaseDisableCVO,           // 3
-			migrationv1alpha1.PhaseUpdateSecrets,        // 4
-			migrationv1alpha1.PhaseCreateTags,           // 5
-			migrationv1alpha1.PhaseCreateFolder,         // 6
-			migrationv1alpha1.PhaseDeleteCPMS,           // 7
-			migrationv1alpha1.PhaseUpdateInfrastructure, // 8
-			migrationv1alpha1.PhaseUpdateConfig,         // 9
-			migrationv1alpha1.PhaseRestartPods,          // 10
-			migrationv1alpha1.PhaseMonitorHealth,        // 11
-			migrationv1alpha1.PhaseCreateWorkers,        // 12
-			migrationv1alpha1.PhaseRecreateCPMS,         // 13
-			migrationv1alpha1.PhaseMigrateCSIVolumes,    // 14
-			migrationv1alpha1.PhaseScaleOldMachines,     // 15
-			migrationv1alpha1.PhaseCleanup,              // 16
-			migrationv1alpha1.PhaseVerify,               // 17
+			migrationv1alpha1.PhasePreflight,
+			migrationv1alpha1.PhaseBackup,
+			migrationv1alpha1.PhaseDisableCVO,
+			migrationv1alpha1.PhaseUpdateSecrets,
+			migrationv1alpha1.PhaseCreateTags,
+			migrationv1alpha1.PhaseCreateFolder,
+			migrationv1alpha1.PhaseDeleteCPMS,
+			migrationv1alpha1.PhaseUpdateInfrastructure,
+			migrationv1alpha1.PhaseUpdateConfig,
+			migrationv1alpha1.PhaseRestartPods,
+			migrationv1alpha1.PhaseMonitorHealth,
+			migrationv1alpha1.PhaseCreateWorkers,
+			migrationv1alpha1.PhaseRecreateCPMS,
+			migrationv1alpha1.PhaseMigrateCSIVolumes,
+			migrationv1alpha1.PhaseScaleOldMachines,
+			migrationv1alpha1.PhaseCleanup,
+			migrationv1alpha1.PhaseVerify,
 		},
 	}
 }
