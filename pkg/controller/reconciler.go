@@ -224,8 +224,11 @@ func (c *MigrationController) getPhaseImplementation(phase migrationv1alpha1.Mig
 		return phases.NewCreateWorkersPhase(c.phaseExecutor)
 	case migrationv1alpha1.PhaseRecreateCPMS:
 		return phases.NewRecreateCPMSPhase(c.phaseExecutor)
-	case migrationv1alpha1.PhaseMigrateCSIVolumes:
-		return phases.NewMigrateCSIVolumesPhase(c.phaseExecutor)
+		/*
+			case migrationv1alpha1.PhaseMigrateCSIVolumes:
+				return phases.NewMigrateCSIVolumesPhase(c.phaseExecutor)
+
+		*/
 	case migrationv1alpha1.PhaseScaleOldMachines:
 		return phases.NewScaleOldMachinesPhase(c.phaseExecutor)
 	case migrationv1alpha1.PhaseCleanup:
@@ -252,7 +255,10 @@ func (c *MigrationController) getAllPhases() []phases.Phase {
 		phases.NewRestartPodsPhase(c.phaseExecutor),
 		phases.NewMonitorHealthPhase(c.phaseExecutor),
 		phases.NewCreateWorkersPhase(c.phaseExecutor),
-		phases.NewRecreateCPMSPhase(c.phaseExecutor),
+		/*
+			phases.NewRecreateCPMSPhase(c.phaseExecutor),
+
+		*/
 		phases.NewMigrateCSIVolumesPhase(c.phaseExecutor),
 		phases.NewScaleOldMachinesPhase(c.phaseExecutor),
 		phases.NewCleanupPhase(c.phaseExecutor),

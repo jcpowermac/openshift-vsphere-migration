@@ -37,7 +37,6 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 	logger := klog.FromContext(ctx)
 	logs := make([]migrationv1alpha1.LogEntry, 0)
 
-	// Check if this is a resume (CPMS already updated, just polling for rollout)
 	isResume := migration.Status.CurrentPhaseState != nil &&
 		migration.Status.CurrentPhaseState.Name == p.Name() &&
 		migration.Status.CurrentPhaseState.Status == migrationv1alpha1.PhaseStatusRunning
@@ -45,16 +44,13 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 	machineManager := p.executor.GetMachineManager()
 
 	if !isResume {
-		// First execution - update CPMS
+
+		// --- First execution: update CPMS, then requeue ---
 		logger.Info("Updating Control Plane Machine Set for new vCenter")
 		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Updating Control Plane Machine Set", string(p.Name()))
 
-		// CPMS was already deleted in Phase 6 (DeleteCPMS) and should be auto-recreated as Inactive
-		// Wait for CPMS to become Inactive (auto-recreated)
 		logger.Info("Waiting for CPMS to become Inactive")
-		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-			"Waiting for CPMS to become Inactive",
-			string(p.Name()))
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Waiting for CPMS to become Inactive", string(p.Name()))
 
 		if err := machineManager.WaitForCPMSInactive(ctx, 5*time.Minute); err != nil {
 			return &PhaseResult{
@@ -64,11 +60,8 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 			}, err
 		}
 
-		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-			"CPMS is now Inactive",
-			string(p.Name()))
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "CPMS is now Inactive", string(p.Name()))
 
-		// Get infrastructure ID for folder path construction
 		infraID, err := p.executor.infraManager.GetInfrastructureID(ctx)
 		if err != nil {
 			return &PhaseResult{
@@ -78,12 +71,9 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 			}, err
 		}
 
-		// Update CPMS with new failure domain and set to Active
 		logger.Info("Updating CPMS with new failure domain",
 			"failureDomain", migration.Spec.ControlPlaneMachineSetConfig.FailureDomain)
-		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-			"Updating CPMS with target vCenter failure domain",
-			string(p.Name()))
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Updating CPMS with target vCenter failure domain", string(p.Name()))
 
 		if err := machineManager.UpdateCPMSFailureDomain(ctx, migration, infraID); err != nil {
 			return &PhaseResult{
@@ -93,21 +83,42 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 			}, err
 		}
 
-		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-			"Updated CPMS and set to Active",
-			string(p.Name()))
-	} else {
-		logger.Info("Resuming control plane rollout check")
-		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-			"Resuming control plane rollout check",
-			string(p.Name()))
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Updated CPMS and set to Active, waiting for rollout to begin", string(p.Name()))
 	}
+	/*
+		// Do NOT check rollout status — the CPMS controller needs time to react.
+		// Return Running to trigger requeue; StartTime will be set by the reconciler.
+		return &PhaseResult{
+			Status:       migrationv1alpha1.PhaseStatusRunning,
+			Message:      "CPMS updated, waiting for control plane rollout to begin",
+			Progress:     0,
+			Logs:         logs,
+			RequeueAfter: 30 * time.Second,
+		}, nil
 
-	// Check rollout status (non-blocking to avoid leader election timeout)
-	logger.Info("Checking control plane rollout status")
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Checking control plane rollout status",
-		string(p.Name()))
+	*/
+
+	// --- Resume: monitor rollout ---
+	logger.Info("Monitoring control plane rollout status")
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Checking control plane rollout status", string(p.Name()))
+
+	// Check if CPMS controller has observed the spec update
+	observed, err := machineManager.IsCPMSGenerationObserved(ctx)
+	if err != nil {
+		logger.V(2).Info("Unable to check CPMS generation", "error", err)
+		// Non-fatal — fall through to replica check with monitoring period guard
+	} else if !observed {
+		msg := "CPMS controller has not yet processed the spec update"
+		logger.Info(msg)
+		logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, msg, string(p.Name()))
+		return &PhaseResult{
+			Status:       migrationv1alpha1.PhaseStatusRunning,
+			Message:      msg,
+			Progress:     0,
+			Logs:         logs,
+			RequeueAfter: 30 * time.Second,
+		}, nil
+	}
 
 	complete, replicas, updatedReplicas, readyReplicas, err := machineManager.CheckControlPlaneRolloutStatus(ctx)
 	if err != nil {
@@ -116,6 +127,26 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 			Message: "Failed to check control plane rollout status: " + err.Error(),
 			Logs:    logs,
 		}, err
+	}
+
+	// Enforce minimum monitoring period: even if replicas look healthy,
+	// the CPMS controller may not have started the rollout yet.
+	const minMonitoringDuration = 5 * time.Minute
+	if complete && migration.Status.CurrentPhaseState != nil && migration.Status.CurrentPhaseState.StartTime != nil {
+		elapsed := time.Since(migration.Status.CurrentPhaseState.StartTime.Time)
+		if elapsed < minMonitoringDuration {
+			msg := fmt.Sprintf("Monitoring rollout stability (%s / %s elapsed)",
+				elapsed.Truncate(time.Second), minMonitoringDuration)
+			logger.Info(msg)
+			logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, msg, string(p.Name()))
+			return &PhaseResult{
+				Status:       migrationv1alpha1.PhaseStatusRunning,
+				Message:      msg,
+				Progress:     50,
+				Logs:         logs,
+				RequeueAfter: 30 * time.Second,
+			}, nil
+		}
 	}
 
 	if !complete {
@@ -138,10 +169,8 @@ func (p *RecreateCPMSPhase) Execute(ctx context.Context, migration *migrationv1a
 		}, nil
 	}
 
-	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo,
-		"Control plane rollout completed successfully",
-		string(p.Name()))
-
+	// Rollout complete and monitoring period elapsed
+	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Control plane rollout completed successfully", string(p.Name()))
 	logger.Info("Successfully updated Control Plane Machine Set")
 
 	return &PhaseResult{

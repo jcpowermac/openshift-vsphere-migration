@@ -122,3 +122,129 @@ func (m *VolumeAttachmentManager) GetVolumeAttachment(ctx context.Context, name 
 	}
 	return va, nil
 }
+
+// VolumeAttachmentIssue describes a stuck or problematic VolumeAttachment
+type VolumeAttachmentIssue struct {
+	VAName        string
+	PVName        string
+	NodeName      string
+	DetachError   string
+	DeletionStuck bool
+	StuckDuration time.Duration
+}
+
+// DiagnoseStuckAttachments detects VolumeAttachments stuck in deletion
+// Returns list of VolumeAttachments with deletion timestamps older than the timeout
+func (m *VolumeAttachmentManager) DiagnoseStuckAttachments(ctx context.Context, timeout time.Duration) ([]VolumeAttachmentIssue, error) {
+	logger := klog.FromContext(ctx)
+	logger.V(2).Info("Diagnosing stuck VolumeAttachments", "timeout", timeout)
+
+	vaList, err := m.kubeClient.StorageV1().VolumeAttachments().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list VolumeAttachments: %w", err)
+	}
+
+	var issues []VolumeAttachmentIssue
+	now := time.Now()
+
+	for _, va := range vaList.Items {
+		// Check if VolumeAttachment has deletion timestamp
+		if va.DeletionTimestamp == nil {
+			continue
+		}
+
+		stuckDuration := now.Sub(va.DeletionTimestamp.Time)
+		if stuckDuration > timeout {
+			issue := VolumeAttachmentIssue{
+				VAName:        va.Name,
+				NodeName:      va.Spec.NodeName,
+				DeletionStuck: true,
+				StuckDuration: stuckDuration,
+			}
+
+			// Get PV name if available
+			if va.Spec.Source.PersistentVolumeName != nil {
+				issue.PVName = *va.Spec.Source.PersistentVolumeName
+			}
+
+			// Check for detach errors in status
+			if va.Status.DetachError != nil {
+				issue.DetachError = va.Status.DetachError.Message
+			}
+
+			issues = append(issues, issue)
+			logger.Info("Found stuck VolumeAttachment",
+				"va", issue.VAName,
+				"pv", issue.PVName,
+				"node", issue.NodeName,
+				"stuckDuration", stuckDuration,
+				"detachError", issue.DetachError)
+		}
+	}
+
+	logger.V(2).Info("Diagnosed stuck VolumeAttachments", "count", len(issues))
+	return issues, nil
+}
+
+// ForceDetachVolume forces cleanup of a stuck VolumeAttachment by removing finalizers
+// ONLY call this after verifying the volume is truly detached at vSphere level
+// This is a last-resort safety mechanism for when CSI driver has lost internal state
+func (m *VolumeAttachmentManager) ForceDetachVolume(ctx context.Context, pvName string) error {
+	logger := klog.FromContext(ctx)
+
+	// Get the VolumeAttachment for this PV
+	va, err := m.GetVolumeAttachmentForPV(ctx, pvName)
+	if err != nil {
+		return fmt.Errorf("failed to get VolumeAttachment: %w", err)
+	}
+
+	if va == nil {
+		logger.Info("No VolumeAttachment found - already detached", "pv", pvName)
+		return nil
+	}
+
+	// Log the force-detach action prominently for audit trail
+	logger.Info("========================================")
+	logger.Info("FORCE DETACHING VOLUME")
+	logger.Info("========================================")
+	logger.Info("Force-detaching stuck VolumeAttachment after vSphere-level verification",
+		"pv", pvName,
+		"volumeAttachment", va.Name,
+		"node", va.Spec.NodeName,
+		"deletionTimestamp", va.DeletionTimestamp)
+
+	// Remove all finalizers to allow immediate deletion
+	va.Finalizers = []string{}
+
+	// Update the VolumeAttachment
+	_, err = m.kubeClient.StorageV1().VolumeAttachments().Update(ctx, va, metav1.UpdateOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("VolumeAttachment already deleted during force-detach", "pv", pvName)
+			return nil
+		}
+		return fmt.Errorf("failed to remove finalizers from VolumeAttachment: %w", err)
+	}
+
+	logger.Info("Removed finalizers from VolumeAttachment, waiting for deletion", "va", va.Name)
+
+	// Wait for deletion to complete (should be immediate after finalizer removal)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		currentVA, err := m.GetVolumeAttachment(ctx, va.Name)
+		if err != nil {
+			return fmt.Errorf("failed to check VolumeAttachment deletion status: %w", err)
+		}
+		if currentVA == nil {
+			logger.Info("VolumeAttachment successfully deleted after force-detach", "pv", pvName)
+			logger.Info("========================================")
+			logger.Info("FORCE DETACH COMPLETED")
+			logger.Info("========================================")
+			return nil
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	return fmt.Errorf("timeout waiting for VolumeAttachment deletion after finalizer removal")
+}

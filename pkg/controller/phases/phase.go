@@ -90,20 +90,27 @@ func NewPhaseExecutor(
 
 // ExecutePhase executes a phase and updates the migration status
 func (e *PhaseExecutor) ExecutePhase(ctx context.Context, phase Phase, migration *migrationv1alpha1.VmwareCloudFoundationMigration) (*PhaseResult, error) {
-	// Initialize phase state
-	phaseState := &migrationv1alpha1.PhaseState{
-		Name:     phase.Name(),
-		Status:   migrationv1alpha1.PhaseStatusRunning,
-		Progress: 0,
-		Message:  "Starting phase",
+	// Only initialize phase state for a new phase execution.
+	// If the phase is already running (requeue/resume), preserve the existing state
+	// so that phase.Execute() can detect the resume via CurrentPhaseState.Status.
+	if migration.Status.CurrentPhaseState == nil ||
+		migration.Status.CurrentPhaseState.Name != phase.Name() ||
+		migration.Status.CurrentPhaseState.Status != migrationv1alpha1.PhaseStatusRunning {
+
+		phaseState := &migrationv1alpha1.PhaseState{
+			Name:     phase.Name(),
+			Status:   migrationv1alpha1.PhaseStatusPending,
+			Progress: 0,
+			Message:  "Pending phase",
+		}
+		migration.Status.CurrentPhaseState = phaseState
 	}
-	migration.Status.CurrentPhaseState = phaseState
 
 	// Add log entry
 	startLog := migrationv1alpha1.LogEntry{
 		Timestamp: metav1.Now(),
 		Level:     migrationv1alpha1.LogLevelInfo,
-		Message:   "Phase started",
+		Message:   "Phase pending",
 		Component: string(phase.Name()),
 	}
 

@@ -781,6 +781,29 @@ func (m *MachineManager) CheckControlPlaneRolloutStatus(ctx context.Context) (co
 	return complete, replicas, updatedReplicas, readyReplicas, nil
 }
 
+// IsCPMSGenerationObserved checks if the CPMS controller has processed the latest spec update
+// by comparing metadata.generation to status.observedGeneration.
+func (m *MachineManager) IsCPMSGenerationObserved(ctx context.Context) (bool, error) {
+	if m.dynamicClient == nil {
+		return false, fmt.Errorf("dynamic client not initialized")
+	}
+
+	cpms, err := m.dynamicClient.Resource(cpmsGVR).Namespace(MachineAPINamespace).Get(ctx, "cluster", metav1.GetOptions{})
+	if err != nil {
+		return false, fmt.Errorf("failed to get CPMS: %w", err)
+	}
+
+	generation := cpms.GetGeneration()
+
+	observedGeneration, found, err := unstructured.NestedInt64(cpms.Object, "status", "observedGeneration")
+	if err != nil || !found {
+		// If observedGeneration doesn't exist, controller hasn't processed anything yet
+		return false, nil
+	}
+
+	return observedGeneration >= generation, nil
+}
+
 // WaitForControlPlaneRollout waits for the control plane rollout to complete
 func (m *MachineManager) WaitForControlPlaneRollout(ctx context.Context, timeout time.Duration) error {
 	logger := klog.FromContext(ctx)
@@ -862,4 +885,81 @@ func (m *MachineManager) CheckNodesReady(ctx context.Context, machineSetName str
 		"total", total)
 
 	return complete, ready, total, nil
+}
+
+// CheckMachinesDeleted checks if all Machine objects for a MachineSet have been deleted
+func (m *MachineManager) CheckMachinesDeleted(ctx context.Context, machineSetName string) (allDeleted bool, remaining int32, err error) {
+	logger := klog.FromContext(ctx)
+
+	if m.machineClient == nil {
+		return false, 0, fmt.Errorf("machine client not initialized")
+	}
+
+	machines, err := m.machineClient.MachineV1beta1().Machines(MachineAPINamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labels.SelectorFromSet(labels.Set{
+			"machine.openshift.io/cluster-api-machineset": machineSetName,
+		}).String(),
+	})
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to list machines for MachineSet %s: %w", machineSetName, err)
+	}
+
+	remaining = int32(len(machines.Items))
+	allDeleted = remaining == 0
+
+	logger.V(2).Info("Machine deletion status",
+		"machineSet", machineSetName,
+		"allDeleted", allDeleted,
+		"remaining", remaining)
+
+	return allDeleted, remaining, nil
+}
+
+// CheckNodesDeletedForMachines checks if all Nodes referenced by Machines in a MachineSet have been removed
+func (m *MachineManager) CheckNodesDeletedForMachines(ctx context.Context, machineSetName string) (allDeleted bool, remaining int32, err error) {
+	logger := klog.FromContext(ctx)
+
+	if m.machineClient == nil {
+		return false, 0, fmt.Errorf("machine client not initialized")
+	}
+
+	machines, err := m.machineClient.MachineV1beta1().Machines(MachineAPINamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labels.SelectorFromSet(labels.Set{
+			"machine.openshift.io/cluster-api-machineset": machineSetName,
+		}).String(),
+	})
+	if err != nil {
+		return false, 0, fmt.Errorf("failed to list machines for MachineSet %s: %w", machineSetName, err)
+	}
+
+	// If no machines exist, all nodes are gone too
+	if len(machines.Items) == 0 {
+		return true, 0, nil
+	}
+
+	remaining = 0
+	for _, machine := range machines.Items {
+		if machine.Status.NodeRef == nil {
+			continue
+		}
+		_, err := m.kubeClient.CoreV1().Nodes().Get(ctx, machine.Status.NodeRef.Name, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				continue // Node is gone
+			}
+			logger.V(2).Info("Error checking node existence", "node", machine.Status.NodeRef.Name, "error", err)
+			continue
+		}
+		// Node still exists
+		remaining++
+	}
+
+	allDeleted = remaining == 0
+
+	logger.V(2).Info("Node deletion status for MachineSet",
+		"machineSet", machineSetName,
+		"allDeleted", allDeleted,
+		"remaining", remaining)
+
+	return allDeleted, remaining, nil
 }

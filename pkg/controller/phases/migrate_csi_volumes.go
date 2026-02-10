@@ -61,6 +61,12 @@ func (p *MigrateCSIVolumesPhase) Execute(ctx context.Context, migration *migrati
 	logger.Info("Starting CSI volume migration phase")
 	logs = AddLog(logs, migrationv1alpha1.LogLevelInfo, "Starting CSI volume migration", string(p.Name()))
 
+	// Preflight check: Detect stuck VolumeAttachments before starting migration
+	if err := p.preflightCheck(ctx, &logs); err != nil {
+		logger.Error(err, "Preflight check detected issues with VolumeAttachments")
+		// Don't fail migration, just log warnings - automatic remediation will handle it
+	}
+
 	// Initialize CSI migration status if needed
 	if migration.Status.CSIVolumeMigration == nil {
 		migration.Status.CSIVolumeMigration = &migrationv1alpha1.CSIVolumeMigrationStatus{
@@ -439,6 +445,7 @@ func identifyWorkloadType(scaledResources []migrationv1alpha1.ScaledResource) st
 }
 
 // deletePVC deletes the PVC after workloads are quiesced and waits for VolumeAttachment deletion
+// Implements automatic remediation for stuck VolumeAttachments using defense-in-depth verification
 func (p *MigrateCSIVolumesPhase) deletePVC(ctx context.Context, pvManager *openshift.PersistentVolumeManager, pvState *migrationv1alpha1.PVMigrationState) error {
 	logger := klog.FromContext(ctx)
 
@@ -465,12 +472,121 @@ func (p *MigrateCSIVolumesPhase) deletePVC(ctx context.Context, pvManager *opens
 	// performs the actual vSphere detach. We must wait for VolumeAttachment deletion
 	// to confirm the VMDK is fully detached before attempting migration.
 	vaManager := openshift.NewVolumeAttachmentManager(p.executor.kubeClient)
-	if err := vaManager.WaitForVolumeDetached(ctx, pvState.PVName, 3*time.Minute); err != nil {
-		return fmt.Errorf("timeout waiting for volume detachment (VolumeAttachment deletion): %w", err)
+	detachErr := vaManager.WaitForVolumeDetached(ctx, pvState.PVName, 3*time.Minute)
+
+	if detachErr != nil {
+		// VolumeAttachment deletion timed out - this may indicate CSI driver lost internal state
+		// Perform defense-in-depth verification at vSphere level before force-detaching
+		logger.Info("========================================")
+		logger.Info("VOLUMEATTACHMENT DELETION TIMEOUT")
+		logger.Info("========================================")
+		logger.Info("VolumeAttachment deletion timed out, performing vSphere-level verification",
+			"pv", pvState.PVName,
+			"error", detachErr)
+
+		// Attempt automatic remediation with vSphere-level safety verification
+		if err := p.remediateStuckVolumeAttachment(ctx, pvState, vaManager); err != nil {
+			// Remediation failed - return original timeout error
+			logger.Error(err, "Failed to remediate stuck VolumeAttachment",
+				"pv", pvState.PVName)
+			return fmt.Errorf("timeout waiting for volume detachment (VolumeAttachment deletion): %w", detachErr)
+		}
+
+		logger.Info("Successfully remediated stuck VolumeAttachment", "pv", pvState.PVName)
 	}
 
 	pvState.Status = PVStatusPVCDeleted
 	logger.Info("PVC deleted and volume detachment confirmed", "namespace", pvState.PVCNamespace, "name", pvState.PVCName)
+	return nil
+}
+
+// remediateStuckVolumeAttachment performs automatic remediation of stuck VolumeAttachment
+// Uses defense-in-depth verification at vSphere level before force-cleaning Kubernetes resource
+func (p *MigrateCSIVolumesPhase) remediateStuckVolumeAttachment(ctx context.Context, pvState *migrationv1alpha1.PVMigrationState, vaManager *openshift.VolumeAttachmentManager) error {
+	logger := klog.FromContext(ctx)
+
+	logger.Info("Starting automatic remediation for stuck VolumeAttachment",
+		"pv", pvState.PVName)
+
+	// Parse FCD ID from volume handle
+	fcdID, err := vsphere.ParseCSIVolumeHandle(pvState.SourceVolumePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse volume handle: %w", err)
+	}
+
+	logger.Info("Parsed FCD ID from volume handle", "fcdID", fcdID)
+
+	// Get source vCenter client for verification
+	sourceVCenter, err := p.executor.infraManager.GetSourceVCenter(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get source vCenter: %w", err)
+	}
+
+	sourceClient, err := p.executor.GetVSphereClient(ctx, sourceVCenter.Server)
+	if err != nil {
+		return fmt.Errorf("failed to connect to source vCenter: %w", err)
+	}
+	defer sourceClient.Logout(ctx)
+
+	// Get source failure domain for folder path
+	sourceFailureDomain, err := p.executor.infraManager.GetSourceFailureDomain(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get source failure domain: %w", err)
+	}
+
+	// Get infrastructure ID for folder path
+	infraID, err := p.executor.infraManager.GetInfrastructureID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get infrastructure ID: %w", err)
+	}
+
+	// Create FCD manager for vSphere-level verification
+	sourceFCDManager, err := vsphere.NewFCDManager(ctx, sourceClient)
+	if err != nil {
+		return fmt.Errorf("failed to create FCD manager: %w", err)
+	}
+
+	// === DEFENSE-IN-DEPTH: Verify volume is truly detached at vSphere level ===
+	// This reuses the existing safety mechanism from relocateVolume()
+	logger.Info("Verifying FCD is detached at vSphere level before force-cleaning K8s resource",
+		"fcdID", fcdID, "pv", pvState.PVName)
+
+	folderPath := fmt.Sprintf("/%s/vm/%s", sourceFailureDomain.Topology.Datacenter, infraID)
+
+	// Wait for FCD to be detached from any worker VM (vSphere-level folder scan)
+	// This scans all VMs in the cluster folder to confirm FCD is not attached to any VM
+	if err := sourceFCDManager.WaitForFCDDetached(ctx,
+		sourceFailureDomain.Topology.Datacenter,
+		folderPath,
+		fcdID,
+		1*time.Minute); err != nil {
+
+		// FCD is still attached at vSphere level - this is a real problem, don't force
+		logger.Error(err, "ABORT: FCD is still attached at vSphere level - refusing to force-detach",
+			"fcdID", fcdID, "pv", pvState.PVName)
+		return fmt.Errorf("volume is still attached at vSphere level, refusing to force-detach: %w", err)
+	}
+
+	logger.Info("vSphere-level verification PASSED: FCD is confirmed detached from all VMs",
+		"fcdID", fcdID, "pv", pvState.PVName)
+
+	// Volume is truly detached at vSphere level but VolumeAttachment is stuck in K8s
+	// This indicates CSI driver has lost internal state - safe to force-clean K8s resource
+	logger.Info("VolumeAttachment is stuck but volume is detached at vSphere - forcing cleanup",
+		"pv", pvState.PVName)
+
+	if err := vaManager.ForceDetachVolume(ctx, pvState.PVName); err != nil {
+		return fmt.Errorf("failed to force-detach volume: %w", err)
+	}
+
+	logger.Info("========================================")
+	logger.Info("AUTOMATIC REMEDIATION SUCCESSFUL")
+	logger.Info("========================================")
+	logger.Info("Stuck VolumeAttachment remediated",
+		"pv", pvState.PVName,
+		"fcdID", fcdID,
+		"verificationMethod", "vSphere-level FCD detachment check")
+
 	return nil
 }
 
@@ -830,6 +946,59 @@ func (p *MigrateCSIVolumesPhase) restorePVCAndWorkloads(ctx context.Context, pvM
 	}
 
 	logger.Info("Successfully restored PVC and workloads", "pv", pvState.PVName)
+	return nil
+}
+
+// preflightCheck performs health checks before starting CSI volume migration
+// Detects stuck VolumeAttachments and logs warnings
+func (p *MigrateCSIVolumesPhase) preflightCheck(ctx context.Context, logs *[]migrationv1alpha1.LogEntry) error {
+	logger := klog.FromContext(ctx)
+	logger.Info("Running preflight checks for CSI volume migration")
+
+	vaManager := openshift.NewVolumeAttachmentManager(p.executor.kubeClient)
+
+	// Check for VolumeAttachments stuck in deletion >5 minutes
+	stuckVAs, err := vaManager.DiagnoseStuckAttachments(ctx, 5*time.Minute)
+	if err != nil {
+		logger.Error(err, "Failed to diagnose stuck VolumeAttachments")
+		return err
+	}
+
+	if len(stuckVAs) > 0 {
+		logger.Info("========================================")
+		logger.Info("PREFLIGHT WARNING: STUCK VOLUMEATTACHMENTS DETECTED")
+		logger.Info("========================================")
+		logger.Info("Found VolumeAttachments stuck in deletion",
+			"count", len(stuckVAs))
+
+		for _, issue := range stuckVAs {
+			logger.Info("Stuck VolumeAttachment details",
+				"va", issue.VAName,
+				"pv", issue.PVName,
+				"node", issue.NodeName,
+				"stuckDuration", issue.StuckDuration,
+				"detachError", issue.DetachError)
+
+			*logs = AddLog(*logs, migrationv1alpha1.LogLevelWarning,
+				fmt.Sprintf("Found stuck VolumeAttachment: %s (PV: %s, stuck for: %v)",
+					issue.VAName, issue.PVName, issue.StuckDuration),
+				string(p.Name()))
+		}
+
+		logger.Info("========================================")
+		logger.Info("Automatic remediation will handle stuck VolumeAttachments during migration")
+		logger.Info("========================================")
+
+		*logs = AddLog(*logs, migrationv1alpha1.LogLevelInfo,
+			fmt.Sprintf("Preflight detected %d stuck VolumeAttachments - automatic remediation enabled", len(stuckVAs)),
+			string(p.Name()))
+	} else {
+		logger.Info("Preflight check passed: no stuck VolumeAttachments detected")
+		*logs = AddLog(*logs, migrationv1alpha1.LogLevelInfo,
+			"Preflight check passed: no stuck VolumeAttachments detected",
+			string(p.Name()))
+	}
+
 	return nil
 }
 

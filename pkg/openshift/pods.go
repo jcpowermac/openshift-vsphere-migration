@@ -144,6 +144,14 @@ func (m *PodManager) RestartVSpherePods(ctx context.Context) error {
 		logger.Error(err, "Failed to delete cloud controller manager pods")
 		// Continue with other pods
 	}
+	// Delete cloud controller manager pods
+	_, err = m.DeletePodsByLabel(ctx, "openshift-kube-controller-manager", map[string]string{
+		"app": "kube-controller-manager",
+	})
+	if err != nil {
+		logger.Error(err, "Failed to delete kube controller manager pods")
+		// Continue with other pods
+	}
 
 	// Delete machine API controller pods
 	_, err = m.DeletePodsByLabel(ctx, "openshift-machine-api", map[string]string{
@@ -175,16 +183,16 @@ func (m *PodManager) RestartVSpherePods(ctx context.Context) error {
 
 // VSpherePodsStatus contains the status of vSphere pods
 type VSpherePodsStatus struct {
-	AllReady                  bool
-	CloudControllerReady      int
-	CloudControllerTotal      int
-	MachineAPIReady           int
-	MachineAPITotal           int
-	CSIControllerReady        int
-	CSIControllerTotal        int
-	CSINodeReady              int
-	CSINodeTotal              int
-	NotReadyReason            string
+	AllReady             bool
+	CloudControllerReady int
+	CloudControllerTotal int
+	MachineAPIReady      int
+	MachineAPITotal      int
+	CSIControllerReady   int
+	CSIControllerTotal   int
+	CSINodeReady         int
+	CSINodeTotal         int
+	NotReadyReason       string
 }
 
 // CheckVSpherePodsReady checks if all vSphere pods are ready without blocking

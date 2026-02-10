@@ -36,7 +36,7 @@ func NewStateMachine(executor *phases.PhaseExecutor) *StateMachine {
 			migrationv1alpha1.PhaseMonitorHealth,
 			migrationv1alpha1.PhaseCreateWorkers,
 			migrationv1alpha1.PhaseRecreateCPMS,
-			migrationv1alpha1.PhaseMigrateCSIVolumes,
+			//migrationv1alpha1.PhaseMigrateCSIVolumes,
 			migrationv1alpha1.PhaseScaleOldMachines,
 			migrationv1alpha1.PhaseCleanup,
 			migrationv1alpha1.PhaseVerify,
